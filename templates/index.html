@@ -1824,6 +1824,8 @@ async function loadProviderStatus(force = false) {
     body.innerHTML = '<div style="color:var(--fail2);font-size:12px;">Failed to load provider status</div>';
   }
 }
+
+function toggleProviderCheck(ii, li, pi, enabled) {
   if (enabled) {
     _settingsData.instances[ii].libraries[li].paths[pi].provider_checks = [{ type: 'realdebrid', api_key: '' }];
   } else {
