@@ -414,6 +414,34 @@ def api_config_load():
         return jsonify({"ok": False, "error": str(e)}), 500
 
 
+@app.route("/api/debug/trash/<instance_name>/<section_id>")
+@require_auth
+def api_debug_trash(instance_name: str, section_id: str):
+    """Debug endpoint — shows raw trash item counts per type level."""
+    inst = next((i for i in config.instances if i.name == instance_name), None)
+    if not inst:
+        return jsonify({"error": "instance not found"}), 404
+    plex = plex_clients[inst.name]
+    result = {}
+    for type_id in [1, 2, 3, 4]:
+        try:
+            r = plex._get(
+                f"/library/sections/{section_id}/all",
+                params={"checkFiles": 1, "type": type_id},
+                timeout=120,
+            )
+            items = r.json().get("MediaContainer", {}).get("Metadata", [])
+            deleted = [i for i in items if i.get("deletedAt")]
+            result[f"type_{type_id}"] = {
+                "total_returned": len(items),
+                "deleted_count":  len(deleted),
+                "titles":         [i.get("title") for i in deleted[:10]],
+            }
+        except Exception as e:
+            result[f"type_{type_id}"] = {"error": str(e)}
+    return jsonify(result)
+
+
 @app.route("/api/providers/status")
 @require_auth
 def api_providers_status():
