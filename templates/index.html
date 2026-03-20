@@ -1391,11 +1391,10 @@ async function runAll() {
   const btn = document.getElementById('btn-all');
   btn.disabled = true; btn.innerHTML = `<span class="spin"></span>`;
   toast('Running all libraries…');
+  const prev = [..._history];
   try {
     await fetch('/api/run/all', {method:'POST'});
-    await new Promise(r => setTimeout(r, 4000));
-    await Promise.all([fetchStatus(), fetchHistory()]);
-    toast('✓ All runs complete', 'pass');
+    pollUntilUpdate(prev);
   } catch(e) { toast('Error', 'fail'); }
   finally { btn.disabled = false; btn.innerHTML = '▶ run all'; }
 }
@@ -1403,11 +1402,10 @@ async function dryRunAll() {
   const btn = document.getElementById('btn-dryrun');
   btn.disabled = true; btn.innerHTML = `<span class="spin"></span>`;
   toast('Dry run — all libraries…');
+  const prev = [..._history];
   try {
     await fetch('/api/dryrun/all', {method:'POST'});
-    await new Promise(r => setTimeout(r, 4000));
-    await Promise.all([fetchStatus(), fetchHistory()]);
-    toast('◎ Dry run complete', '');
+    pollUntilUpdate(prev);
   } catch(e) { toast('Error', 'fail'); }
   finally { btn.disabled = false; btn.innerHTML = '◎ dry run'; }
 }
@@ -1416,11 +1414,10 @@ async function runLib(inst, lib) {
   const btn = document.getElementById(`btn-r-${id}`);
   if (btn) { btn.disabled = true; btn.innerHTML = `<span class="spin"></span>`; }
   toast(`Running ${lib}…`);
+  const prev = [..._history];
   try {
     await fetch(`/api/run/${encodeURIComponent(inst)}/${encodeURIComponent(lib)}`, {method:'POST'});
-    await new Promise(r => setTimeout(r, 4000));
-    await Promise.all([fetchStatus(), fetchHistory()]);
-    toast(`✓ ${lib} complete`, 'pass');
+    pollUntilUpdate(prev);
   } catch(e) { toast('Error', 'fail'); }
   finally { if (btn) { btn.disabled = false; btn.textContent = '▶'; } }
 }
@@ -1429,11 +1426,10 @@ async function dryRunLib(inst, lib) {
   const btn = document.getElementById(`btn-d-${id}`);
   if (btn) { btn.disabled = true; btn.innerHTML = `<span class="spin"></span>`; }
   toast(`Dry run — ${lib}…`);
+  const prev = [..._history];
   try {
     await fetch(`/api/dryrun/${encodeURIComponent(inst)}/${encodeURIComponent(lib)}`, {method:'POST'});
-    await new Promise(r => setTimeout(r, 4000));
-    await Promise.all([fetchStatus(), fetchHistory()]);
-    toast(`◎ Dry run complete — ${lib}`, '');
+    pollUntilUpdate(prev);
   } catch(e) { toast('Error', 'fail'); }
   finally { if (btn) { btn.disabled = false; btn.textContent = '◎'; } }
 }
@@ -1839,6 +1835,27 @@ function toggleProviderCheck(ii, li, pi, enabled) {
 function setProviderType(ii, li, pi, type) {
   const pcs = _settingsData.instances[ii].libraries[li].paths[pi].provider_checks;
   if (pcs && pcs.length > 0) pcs[0].type = type;
+}
+
+// ── Fast poll after run ───────────────────────────────────────────────────────
+function pollUntilUpdate(prevHistory) {
+  let attempts = 0;
+  const iv = setInterval(async () => {
+    attempts++;
+    await fetchStatus();
+    try {
+      const r = await fetch('/api/history');
+      const h = await r.json();
+      if (h.length !== prevHistory.length ||
+          (h[0] && prevHistory[0] && h[0].timestamp !== prevHistory[0].timestamp)) {
+        _history = h;
+        renderHistory(_history);
+        clearInterval(iv);
+        return;
+      }
+    } catch(e) {}
+    if (attempts >= 20) clearInterval(iv);
+  }, 1000);
 }
 
 function applyTheme(theme) {

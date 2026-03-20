@@ -70,40 +70,63 @@ class PlexClient:
         except Exception:
             return 0
 
-    def get_trash_items(self, section_id: str) -> List[Dict]:
+    def _fetch_deleted(self, section_id: str, type_id: int) -> List[Dict]:
         """
-        Get items that will be removed by emptyTrash.
-        Uses checkFiles=1 + deletedAt detection which works for both
-        traditional trash and unavailable/replaced items.
-        For TV show libraries queries show/season/episode levels separately.
+        Fetch all items with deletedAt set for a given type, using pagination
+        to handle large libraries (e.g. 13k+ episodes).
         """
-        try:
-            section_type = self.get_section_type(section_id)
-            type_ids = _TV_TYPES if section_type == "show" else _MOVIE_TYPES
-
-            all_items = []
-            seen_titles = set()
-
-            for type_id in type_ids:
-                # No container size cap — fetch all items at this level
+        PAGE_SIZE = 500
+        start     = 0
+        deleted   = []
+        while True:
+            try:
                 r = self._get(
                     f"/library/sections/{section_id}/all",
-                    params={"checkFiles": 1, "type": type_id},
-                    timeout=60,
+                    params={
+                        "checkFiles":              1,
+                        "type":                    type_id,
+                        "X-Plex-Container-Start":  start,
+                        "X-Plex-Container-Size":   PAGE_SIZE,
+                    },
+                    timeout=30,
                 )
                 if r.status_code != 200:
-                    continue
-                items = r.json().get("MediaContainer", {}).get("Metadata", [])
+                    break
+                mc    = r.json().get("MediaContainer", {})
+                items = mc.get("Metadata", [])
                 for item in items:
                     if item.get("deletedAt"):
-                        title = item.get("title", "Unknown")
-                        all_items.append({
-                            "title":      title,
+                        deleted.append({
+                            "title":      item.get("title", "Unknown"),
                             "year":       item.get("year", ""),
                             "type":       item.get("type", ""),
                             "deleted_at": item.get("deletedAt", 0),
                         })
-                        seen_titles.add(title)
+                total = int(mc.get("totalSize", 0))
+                start += len(items)
+                if start >= total or not items:
+                    break
+            except Exception:
+                break
+        return deleted
+
+    def get_trash_items(self, section_id: str) -> List[Dict]:
+        """
+        Get items that will be removed by emptyTrash.
+        Uses checkFiles=1 + deletedAt detection with pagination to handle
+        large libraries. Queries all relevant type levels for TV/movie sections.
+        """
+        try:
+            section_type = self.get_section_type(section_id)
+            type_ids     = _TV_TYPES if section_type == "show" else _MOVIE_TYPES
+
+            all_items  = []
+            seen_titles = set()
+
+            for type_id in type_ids:
+                for item in self._fetch_deleted(section_id, type_id):
+                    all_items.append(item)
+                    seen_titles.add(item["title"])
 
             # Also check legacy trash=1 endpoint and merge
             try:
