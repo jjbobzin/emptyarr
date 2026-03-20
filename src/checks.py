@@ -125,20 +125,11 @@ def count_files(path: str) -> int:
 
 def check_file_threshold(path: str, min_threshold: float, plex_count: int) -> Dict:
     """
-    Validate file count on disk:
-    1. Must have at least 10 files (absolute sanity floor — catches empty mounts)
-    2. Must be >= min_threshold * plex_count (percentage-based ratio check)
+    Validate file count on disk using ratio check only.
+    disk_count / plex_count must be >= min_threshold.
+    If plex_count is 0 or unavailable, just verify path is non-empty.
     """
     disk_count = count_files(path)
-    FLOOR = 10  # absolute minimum — catches completely empty/dead mounts
-
-    if disk_count < FLOOR:
-        return {
-            "pass":       False,
-            "disk_count": disk_count,
-            "plex_count": plex_count,
-            "detail":     f"Only {disk_count} files on disk (minimum sanity floor is {FLOOR})"
-        }
 
     if plex_count > 0:
         ratio = disk_count / plex_count
@@ -159,6 +150,14 @@ def check_file_threshold(path: str, min_threshold: float, plex_count: int) -> Di
                            f"({disk_count} on disk / {plex_count} in Plex)")
         }
 
+    # Plex count unavailable — just verify path has at least 1 file
+    if disk_count == 0:
+        return {
+            "pass":       False,
+            "disk_count": 0,
+            "plex_count": 0,
+            "detail":     "No files found on disk (path may be empty or unmounted)"
+        }
     return {
         "pass":       True,
         "disk_count": disk_count,

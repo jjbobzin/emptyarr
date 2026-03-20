@@ -7,7 +7,7 @@ from typing import Dict, List, Optional
 
 from src.config import AppConfig, LibraryConfig, PathConfig, PlexInstanceConfig
 from src.plex_client import PlexClient
-from src.checks import check_mountpoint, check_symlinks, check_file_threshold
+from src.checks import check_mountpoint, check_symlinks, check_file_threshold, count_files
 from src.providers import check_provider
 from src import notifications
 
@@ -103,13 +103,15 @@ def _record(instance_name: str, library_name: str, status: str,
 
 # ── Per-path checks ───────────────────────────────────────────────────────────
 
-def _run_path_checks(path_cfg: PathConfig, plex_count: int) -> Dict:
+def _run_path_checks(path_cfg: PathConfig, plex_count: int,
+                     skip_threshold: bool = False) -> Dict:
     """
     Run all checks appropriate for a single path based on its type.
-    Returns dict of check_name -> result.
+    skip_threshold=True skips the individual file count check (used for mixed
+    libraries where combined count is checked separately).
     """
     results = {}
-    label = path_cfg.path.split("/")[-1] or path_cfg.path  # short label
+    label = path_cfg.path.split("/")[-1] or path_cfg.path
 
     # 1. Mountpoint — always
     results[f"Mount ({label})"] = check_mountpoint(path_cfg.path)
@@ -118,17 +120,46 @@ def _run_path_checks(path_cfg: PathConfig, plex_count: int) -> Dict:
     if path_cfg.type in ("debrid", "usenet"):
         results[f"Symlinks ({label})"] = check_symlinks(path_cfg.path)
 
-    # 3. File threshold — always
-    results[f"Files ({label})"] = check_file_threshold(
-        path_cfg.path, path_cfg.min_threshold, plex_count
-    )
+    # 3. File threshold — skipped for mixed (handled at library level)
+    if not skip_threshold:
+        results[f"Files ({label})"] = check_file_threshold(
+            path_cfg.path, path_cfg.min_threshold, plex_count
+        )
 
-    # 4. Provider API checks — optional, per provider configured on this path
+    # 4. Provider API checks — optional
     for pc in path_cfg.provider_checks:
         check_name = f"{pc.type.capitalize()} API ({label})"
         results[check_name] = check_provider(pc.type, pc.api_key)
 
     return results
+
+
+def _run_mixed_threshold(library: LibraryConfig, plex_count: int) -> Dict:
+    """
+    For mixed libraries: sum files across ALL paths and compare combined
+    total to Plex count. Uses the lowest min_threshold across all paths.
+    """
+    total_disk = sum(count_files(p.path) for p in library.paths)
+    threshold  = min((p.min_threshold for p in library.paths), default=0.90)
+
+    if plex_count > 0:
+        ratio = total_disk / plex_count
+        if ratio < threshold:
+            return {
+                "pass":   False,
+                "detail": (f"Combined ratio {ratio*100:.1f}% below threshold "
+                           f"{threshold*100:.0f}% "
+                           f"({total_disk} total on disk / {plex_count} in Plex)")
+            }
+        return {
+            "pass":   True,
+            "detail": (f"Combined OK: {ratio*100:.1f}% "
+                       f"({total_disk} total on disk / {plex_count} in Plex)")
+        }
+
+    if total_disk == 0:
+        return {"pass": False, "detail": "No files found across any path"}
+    return {"pass": True, "detail": f"{total_disk} total files on disk"}
 
 
 # ── Plex instance global checks ───────────────────────────────────────────────
@@ -182,10 +213,18 @@ def run_library(instance: PlexInstanceConfig, library: LibraryConfig,
     all_checks = dict(plex_checks or run_instance_checks(instance, plex))
 
     # Per-path checks
-    plex_count = plex.get_library_item_count(section_id)
+    plex_count  = plex.get_library_item_count(section_id)
+    is_mixed    = library.type == "mixed"
+
     for path_cfg in library.paths:
-        path_checks = _run_path_checks(path_cfg, plex_count)
+        # For mixed libraries skip individual threshold — use combined check below
+        path_checks = _run_path_checks(path_cfg, plex_count,
+                                       skip_threshold=is_mixed)
         all_checks.update(path_checks)
+
+    # Combined file threshold for mixed libraries
+    if is_mixed and library.paths:
+        all_checks["Files (combined)"] = _run_mixed_threshold(library, plex_count)
 
     # Evaluate
     failed = {n: c for n, c in all_checks.items() if not c["pass"]}

@@ -4,6 +4,9 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>emptyarr</title>
+<link rel="icon" type="image/x-icon" href="/static/favicon.ico">
+<link rel="icon" type="image/png" sizes="32x32" href="/static/favicon-32.png">
+<link rel="apple-touch-icon" href="/static/icon-192.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
@@ -473,7 +476,7 @@ hr.divider{border:none;border-top:1px solid var(--border);margin:16px 0;}
 <!-- ── NAV ── -->
 <nav>
   <a class="nav-brand" href="#">
-    <span class="nav-brand-icon">🗑️</span>
+    <img src="/static/icon.png" alt="emptyarr" style="width:28px;height:28px;object-fit:contain;">
     <span class="nav-brand-name">emptyarr</span>
   </a>
   <div class="nav-links">
@@ -506,7 +509,7 @@ hr.divider{border:none;border-top:1px solid var(--border);margin:16px 0;}
 <div class="page active" id="page-dashboard">
   {% if config_missing %}
   <div class="welcome-wrap">
-    <div class="welcome-icon">⚙️</div>
+    <div class="welcome-icon"><img src="/static/icon.png" alt="emptyarr" style="width:80px;height:80px;object-fit:contain;"></div>
     <div class="welcome-title">Welcome to emptyarr</div>
     <div class="welcome-desc">No configuration found. Use the setup wizard to add your Plex instances and configure your libraries.</div>
     <button class="btn btn-primary" style="font-size:14px;padding:10px 28px;" onclick="openWizard()">Open Setup Wizard</button>
@@ -1050,7 +1053,14 @@ function renderPathItems(paths, ii, li) {
     <div class="path-item">
       <span class="path-item-type">${p.type}</span>
       <span class="path-item-path">${p.path}</span>
-      <span class="path-item-min">${p.min_threshold ?? 90}% threshold</span>
+      <div style="display:flex;align-items:center;gap:4px;flex-shrink:0;">
+        <input type="number" min="1" max="100"
+          value="${p.min_threshold ?? 90}"
+          title="Threshold %"
+          onchange="_settingsData.instances[${ii}].libraries[${li}].paths[${pi}].min_threshold=parseInt(this.value)"
+          style="width:52px;background:var(--surface2);border:1px solid var(--border2);border-radius:4px;padding:2px 6px;font-family:var(--mono);font-size:11px;color:var(--text);text-align:center;outline:none;" />
+        <span style="font-size:10px;color:var(--muted);">%</span>
+      </div>
       <button class="btn btn-danger btn-xs" onclick="removePath(${ii},${li},${pi})" style="padding:2px 7px;flex-shrink:0;">✕</button>
     </div>`).join('');
 }
