@@ -533,7 +533,10 @@ hr.divider{border:none;border-top:1px solid var(--border);margin:16px 0;}
     {% if auth_enabled %}
     <a href="/logout" class="btn btn-secondary btn-sm">Sign out</a>
     {% endif %}
-    <button class="btn btn-secondary btn-icon btn-sm" onclick="toggleTheme()" id="theme-btn" title="Toggle light/dark">🌙</button>
+    <button class="btn btn-secondary btn-icon btn-sm" onclick="toggleTheme()" id="theme-btn" title="Toggle light/dark" style="padding:5px 8px;">
+      <svg id="theme-icon-moon" xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+      <svg id="theme-icon-sun" xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:none;"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
+    </button>
   </div>
 </nav>
 
@@ -634,6 +637,9 @@ hr.divider{border:none;border-top:1px solid var(--border);margin:16px 0;}
         <button class="settings-nav-item active" onclick="showSettingsSection('plex',this)">
           📺 Plex Instances
         </button>
+        <button class="settings-nav-item" onclick="showSettingsSection('providers',this)">
+          ☁️ Providers
+        </button>
         <button class="settings-nav-item" onclick="showSettingsSection('notifications',this)">
           🔔 Notifications
         </button>
@@ -660,6 +666,42 @@ hr.divider{border:none;border-top:1px solid var(--border);margin:16px 0;}
           💾 Save Configuration
         </button>
         <span id="settings-save-result" style="margin-left:12px;font-size:12px;"></span>
+      </div>
+
+      <!-- Providers -->
+      <div class="settings-section" id="ss-providers">
+        <div class="settings-section-title">Debrid Providers</div>
+        <div class="settings-section-desc">Provider API keys are set as environment variables in your Docker UI. emptyarr reads them automatically — they are never written to config.yml.</div>
+
+        <div class="card" style="margin-bottom:16px;">
+          <div class="card-header">
+            <span class="card-title">Account Status</span>
+            <button class="btn btn-secondary btn-sm" onclick="loadProviderStatus(true)">↺ refresh</button>
+          </div>
+          <div class="card-body" id="provider-status-body">
+            <div style="color:var(--muted);font-size:12px;">Loading…</div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-header"><span class="card-title">Environment Variables</span></div>
+          <div class="card-body">
+            <div style="font-size:12px;color:var(--text2);margin-bottom:14px;line-height:1.7;">
+              Set these in your Unraid Docker UI. The variable name determines which provider is checked.
+            </div>
+            ${['RD_API_KEY|Real-Debrid|https://real-debrid.com/apitoken',
+               'AD_API_KEY|AllDebrid|https://alldebrid.com/apikeys',
+               'TB_API_KEY|Torbox|https://torbox.app/settings',
+               'DL_API_KEY|Debrid-Link|https://debrid-link.com/webapp/apikey'].map(s => {
+              const [v,n,u] = s.split('|');
+              return `<div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;padding:8px 10px;background:var(--bg);border:1px solid var(--border);border-radius:6px;">
+                <code style="font-family:var(--mono);font-size:11px;color:var(--accent2);min-width:110px;">${v}</code>
+                <span style="font-size:12px;color:var(--text);flex:1;">${n}</span>
+                <a href="${u}" target="_blank" style="font-size:11px;color:var(--info2);">get key ↗</a>
+              </div>`;
+            }).join('')}
+          </div>
+        </div>
       </div>
 
       <!-- Notifications -->
@@ -835,6 +877,7 @@ function showSettingsSection(name, btn) {
   document.querySelectorAll('.settings-nav-item').forEach(b => b.classList.remove('active'));
   document.getElementById(`ss-${name}`).classList.add('active');
   if (btn) btn.classList.add('active');
+  if (name === 'providers') loadProviderStatus();
 }
 
 // ── Utils ────────────────────────────────────────────────────────────────────
@@ -1140,20 +1183,46 @@ function renderSettingsLibraries(libs, ii) {
 
 function renderPathItems(paths, ii, li) {
   if (!paths.length) return '<div style="color:var(--muted);font-size:11px;margin-bottom:6px;">No paths configured</div>';
-  return paths.map((p, pi) => `
-    <div class="path-item">
-      <span class="path-item-type">${p.type}</span>
-      <span class="path-item-path">${p.path}</span>
-      <div style="display:flex;align-items:center;gap:4px;flex-shrink:0;">
-        <input type="number" min="1" max="100"
-          value="${p.min_threshold ?? 90}"
-          title="Threshold %"
-          onchange="_settingsData.instances[${ii}].libraries[${li}].paths[${pi}].min_threshold=parseInt(this.value)"
-          style="width:52px;background:var(--surface2);border:1px solid var(--border2);border-radius:4px;padding:2px 6px;font-family:var(--mono);font-size:11px;color:var(--text);text-align:center;outline:none;" />
-        <span style="font-size:10px;color:var(--muted);">%</span>
+  return paths.map((p, pi) => {
+    const isDebrid = p.type === 'debrid' || p.type === 'usenet';
+    const hasProviderCheck = p.provider_checks && p.provider_checks.length > 0;
+    const providerType = hasProviderCheck ? p.provider_checks[0].type : '';
+    return `
+    <div class="path-item" style="flex-direction:column;align-items:stretch;gap:6px;">
+      <div style="display:flex;align-items:center;gap:8px;">
+        <span class="path-item-type">${p.type}</span>
+        <span class="path-item-path">${p.path}</span>
+        <div style="display:flex;align-items:center;gap:4px;flex-shrink:0;">
+          <input type="number" min="1" max="100"
+            value="${p.min_threshold ?? 90}"
+            title="Threshold %"
+            onchange="_settingsData.instances[${ii}].libraries[${li}].paths[${pi}].min_threshold=parseInt(this.value)"
+            style="width:52px;background:var(--surface2);border:1px solid var(--border2);border-radius:4px;padding:2px 6px;font-family:var(--mono);font-size:11px;color:var(--text);text-align:center;outline:none;" />
+          <span style="font-size:10px;color:var(--muted);">%</span>
+        </div>
+        <button class="btn btn-danger btn-xs" onclick="removePath(${ii},${li},${pi})" style="padding:2px 7px;flex-shrink:0;">✕</button>
       </div>
-      <button class="btn btn-danger btn-xs" onclick="removePath(${ii},${li},${pi})" style="padding:2px 7px;flex-shrink:0;">✕</button>
-    </div>`).join('');
+      ${isDebrid ? `
+      <div style="padding:6px 8px;background:var(--bg);border:1px solid var(--border);border-radius:5px;display:flex;align-items:center;gap:10px;">
+        <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:11px;color:var(--text2);">
+          <input type="checkbox" ${hasProviderCheck ? 'checked' : ''}
+            style="accent-color:var(--accent);"
+            onchange="toggleProviderCheck(${ii},${li},${pi},this.checked)" />
+          Provider health check
+        </label>
+        ${hasProviderCheck ? `
+        <select style="background:var(--surface2);border:1px solid var(--border2);border-radius:4px;padding:2px 6px;font-size:11px;color:var(--text);outline:none;"
+                onchange="setProviderType(${ii},${li},${pi},this.value)">
+          <option value="realdebrid" ${providerType==='realdebrid'?'selected':''}>Real-Debrid</option>
+          <option value="alldebrid"  ${providerType==='alldebrid'?'selected':''}>AllDebrid</option>
+          <option value="torbox"     ${providerType==='torbox'?'selected':''}>Torbox</option>
+          <option value="debridlink" ${providerType==='debridlink'?'selected':''}>Debrid-Link</option>
+        </select>
+        <span style="font-size:10px;color:var(--muted);">API key from env var</span>
+        ` : ''}
+      </div>` : ''}
+    </div>`;
+  }).join('');
 }
 
 function toggleLibSettings(id) {
@@ -1657,11 +1726,77 @@ async function fetchHistory() {
   try { const r = await fetch('/api/history'); _history = await r.json(); renderHistory(_history); } catch(e) {}
 }
 
-// ── Theme ─────────────────────────────────────────────────────────────────────
+function toggleProviderCheck(ii, li, pi, enabled) {
+  if (enabled) {
+    _settingsData.instances[ii].libraries[li].paths[pi].provider_checks = [{ type: 'realdebrid', api_key: '' }];
+  } else {
+    _settingsData.instances[ii].libraries[li].paths[pi].provider_checks = [];
+  }
+  // Re-render just the paths for this library
+  document.getElementById(`si-paths-${ii}-${li}`).innerHTML =
+    renderPathItems(_settingsData.instances[ii].libraries[li].paths, ii, li);
+}
+
+function setProviderType(ii, li, pi, type) {
+  const pcs = _settingsData.instances[ii].libraries[li].paths[pi].provider_checks;
+  if (pcs && pcs.length > 0) pcs[0].type = type;
+}
+
+async function loadProviderStatus(force = false) {
+  const body = document.getElementById('provider-status-body');
+  if (!body) return;
+  if (!force && body.dataset.loaded) return;
+  body.dataset.loaded = '1';
+  body.innerHTML = '<div style="color:var(--muted);font-size:12px;"><span class="spin"></span> checking…</div>';
+  try {
+    const r = await fetch('/api/providers/status');
+    const d = await r.json();
+    const providers = {
+      realdebrid: 'Real-Debrid',
+      alldebrid:  'AllDebrid',
+      torbox:     'Torbox',
+      debridlink: 'Debrid-Link',
+    };
+    const rows = Object.entries(providers).map(([key, label]) => {
+      const s = d[key] || { ok: false, error: 'No API key set' };
+      if (!s.ok && s.error === 'No API key set') {
+        return `<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--border);">
+          <span style="font-size:12px;font-weight:600;color:var(--text);min-width:100px;">${label}</span>
+          <span style="font-size:11px;color:var(--muted);">No API key configured</span>
+        </div>`;
+      }
+      if (!s.ok) {
+        return `<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--border);">
+          <span style="font-size:12px;font-weight:600;color:var(--text);min-width:100px;">${label}</span>
+          <span class="badge error">${s.error}</span>
+        </div>`;
+      }
+      // Build expiry display
+      let expiryHtml = '';
+      if (s.days_left !== null && s.days_left !== undefined) {
+        const cls = s.days_left <= 7 ? 'fail2' : s.days_left <= 30 ? 'warn2' : 'pass';
+        expiryHtml = `<span style="font-family:var(--mono);font-size:11px;color:var(--${cls});">
+          ${s.days_left}d remaining</span>
+          <span style="font-size:10px;color:var(--muted);">(expires ${s.expiration})</span>`;
+      }
+      return `<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--border);flex-wrap:wrap;">
+        <span style="font-size:12px;font-weight:600;color:var(--bright);min-width:100px;">${label}</span>
+        <span class="badge success">✓ connected</span>
+        <span style="font-size:11px;color:var(--text2);">${s.username || ''}</span>
+        ${expiryHtml}
+      </div>`;
+    }).join('');
+    body.innerHTML = `<div style="font-size:11px;">${rows}</div>`;
+  } catch(e) {
+    body.innerHTML = '<div style="color:var(--fail2);font-size:12px;">Failed to load provider status</div>';
+  }
+}
 function applyTheme(theme) {
   document.documentElement.setAttribute('data-theme', theme);
-  const btn = document.getElementById('theme-btn');
-  if (btn) btn.textContent = theme === 'light' ? '🌙' : '☀️';
+  const moon = document.getElementById('theme-icon-moon');
+  const sun  = document.getElementById('theme-icon-sun');
+  if (moon) moon.style.display = theme === 'light' ? 'none' : 'block';
+  if (sun)  sun.style.display  = theme === 'light' ? 'block' : 'none';
   localStorage.setItem('emptyarr-theme', theme);
 }
 function toggleTheme() {

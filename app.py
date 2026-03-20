@@ -413,6 +413,21 @@ def api_config_load():
         return jsonify({"ok": False, "error": str(e)}), 500
 
 
+@app.route("/api/providers/status")
+@require_auth
+def api_providers_status():
+    """Return account status for all configured providers."""
+    from src.providers import get_account_status, _ENV_KEYS
+    result = {}
+    for provider, env_var in _ENV_KEYS.items():
+        key = os.environ.get(env_var, "")
+        if key:
+            result[provider] = get_account_status(provider, key)
+        else:
+            result[provider] = {"ok": False, "error": "No API key set"}
+    return jsonify(result)
+
+
 @app.route("/api/auth/save", methods=["POST"])
 @require_auth
 def api_auth_save():
