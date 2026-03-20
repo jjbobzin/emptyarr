@@ -1,206 +1,148 @@
 import os
-import yaml
-import logging
-from dataclasses import dataclass, field
-from typing import List, Optional
-
-logger = logging.getLogger("emptyarr")
+import subprocess
+from typing import Dict, List
 
 
-# ── Provider check ────────────────────────────────────────────────────────────
-
-@dataclass
-class ProviderCheck:
-    type: str          # realdebrid | alldebrid | torbox | debridlink
-    api_key: str = ""
-
-
-# ── Path config ───────────────────────────────────────────────────────────────
-
-@dataclass
-class PathConfig:
-    path: str
-    type: str                                    # physical | debrid | usenet
-    min_files: int = 50
-    min_threshold: float = 0.90
-    provider_checks: List[ProviderCheck] = field(default_factory=list)
-
-
-# ── Library config ────────────────────────────────────────────────────────────
-
-@dataclass
-class LibraryConfig:
-    name: str
-    type: str                                    # physical | debrid | usenet | mixed
-    paths: List[PathConfig]
-    cron: str = "0 * * * *"
-    section_id: Optional[str] = None            # auto-discovered if not set
+def check_mountpoint(path: str) -> Dict:
+    """Verify path is an actual mount point, not an empty local dir."""
+    try:
+        result = subprocess.run(
+            ["mountpoint", "-q", path],
+            capture_output=True, timeout=5
+        )
+        if result.returncode == 0:
+            return {"pass": True, "detail": f"Mounted: {path}"}
+        return {"pass": False, "detail": f"Not a mount point: {path}"}
+    except FileNotFoundError:
+        # mountpoint binary unavailable — fall back to existence + non-empty check
+        try:
+            entries = os.listdir(path)
+            if entries:
+                return {"pass": True, "detail": f"Path accessible: {path}"}
+            return {"pass": False, "detail": f"Path exists but is empty: {path}"}
+        except Exception as e:
+            return {"pass": False, "detail": f"Path check error: {e}"}
+    except Exception as e:
+        return {"pass": False, "detail": f"Mountpoint check error: {e}"}
 
 
-# ── Plex instance config ──────────────────────────────────────────────────────
+def check_symlinks(path: str, sample_size: int = 50) -> Dict:
+    """
+    Sample up to sample_size symlinks under path, verify targets resolve.
+    Fails if >10% of sampled symlinks are broken.
+    Checks both file symlinks and directory symlinks (e.g. movie folders).
+    """
+    if not os.path.exists(path):
+        return {"pass": False, "detail": f"Path does not exist: {path}"}
 
-@dataclass
-class PlexInstanceConfig:
-    name: str
-    url: str
-    token: str
-    libraries: List[LibraryConfig]
+    symlinks_checked = 0
+    symlinks_broken  = 0
+    broken_examples  = []
 
+    try:
+        for root, dirs, files in os.walk(path, followlinks=False):
+            # Check file symlinks
+            for fname in files:
+                full = os.path.join(root, fname)
+                if os.path.islink(full):
+                    symlinks_checked += 1
+                    if not os.path.exists(full):
+                        symlinks_broken += 1
+                        if len(broken_examples) < 3:
+                            broken_examples.append(os.path.relpath(full, path))
+                if symlinks_checked >= sample_size:
+                    break
+            # Check directory symlinks (e.g. entire movie folders as symlinks)
+            for d in dirs:
+                full = os.path.join(root, d)
+                if os.path.islink(full):
+                    symlinks_checked += 1
+                    if not os.path.exists(full):
+                        symlinks_broken += 1
+                        if len(broken_examples) < 3:
+                            broken_examples.append(os.path.relpath(full, path))
+                if symlinks_checked >= sample_size:
+                    break
+            if symlinks_checked >= sample_size:
+                break
+    except PermissionError as e:
+        return {"pass": False, "detail": f"Permission error: {e}"}
 
-# ── Notification config ───────────────────────────────────────────────────────
+    if symlinks_checked == 0:
+        return {"pass": True, "detail": f"No symlinks found in {path} — skipped"}
 
-@dataclass
-class NotifyConfig:
-    on_success: bool = False
-    on_failure: bool = True
-    on_skip: bool = True
-
-
-# ── Top-level app config ──────────────────────────────────────────────────────
-
-@dataclass
-class AppConfig:
-    instances: List[PlexInstanceConfig]
-    discord_webhook: str = ""
-    notify: NotifyConfig = field(default_factory=NotifyConfig)
-    log_level: str = "INFO"
-    config_missing: bool = False    # True when no config.yml — UI shows setup prompt
-
-
-# ── Internal helpers ──────────────────────────────────────────────────────────
-
-def _env_keys() -> dict:
-    """Collect debrid API keys from environment."""
+    broken_pct = symlinks_broken / symlinks_checked
+    if broken_pct > 0.10:
+        examples = ", ".join(broken_examples)
+        return {
+            "pass": False,
+            "detail": (f"{symlinks_broken}/{symlinks_checked} sampled symlinks broken "
+                       f"({broken_pct*100:.0f}%) — e.g. {examples}")
+        }
     return {
-        "realdebrid": os.environ.get("RD_API_KEY", ""),
-        "alldebrid":  os.environ.get("AD_API_KEY", ""),
-        "torbox":     os.environ.get("TB_API_KEY", ""),
-        "debridlink": os.environ.get("DL_API_KEY", ""),
+        "pass": True,
+        "detail": (f"Symlinks OK: {symlinks_broken}/{symlinks_checked} broken in sample "
+                   f"({broken_pct*100:.0f}%)")
     }
 
 
-def _load_provider_checks(raw: list) -> List[ProviderCheck]:
-    keys = _env_keys()
-    checks = []
-    for pc in (raw or []):
-        ptype   = pc.get("type", "")
-        api_key = pc.get("api_key", "") or keys.get(ptype, "")
-        checks.append(ProviderCheck(type=ptype, api_key=api_key))
-    return checks
-
-
-def _load_path(raw: dict, lib_type: str,
-               lib_min_files: int, lib_min_threshold: float) -> PathConfig:
-    pc_raw = raw.get("provider_checks", raw.get("provider_check", None))
-    if isinstance(pc_raw, dict):
-        pc_raw = [pc_raw]
-    return PathConfig(
-        path            = raw["path"],
-        type            = raw.get("type", lib_type),
-        min_files       = int(raw.get("min_files", lib_min_files)),
-        min_threshold   = float(raw.get("min_threshold", lib_min_threshold * 100)) / 100.0,
-        provider_checks = _load_provider_checks(pc_raw or []),
-    )
-
-
-def _load_library(raw: dict) -> LibraryConfig:
-    lib_type          = raw.get("type", "physical")
-    lib_min_files     = int(raw.get("min_files", 50))
-    lib_min_threshold = float(raw.get("min_threshold", 90)) / 100.0
-    cron              = raw.get("cron", "0 * * * *")
-    raw_paths         = raw.get("paths", [])
-
-    parsed_paths = []
-    for p in raw_paths:
-        if isinstance(p, str):
-            parsed_paths.append(PathConfig(
-                path          = p,
-                type          = lib_type if lib_type != "mixed" else "physical",
-                min_files     = lib_min_files,
-                min_threshold = lib_min_threshold,
-            ))
-        elif isinstance(p, dict):
-            parsed_paths.append(_load_path(p, lib_type, lib_min_files, lib_min_threshold))
-
-    # Shorthand: single path string at library level
-    if not parsed_paths and raw.get("path"):
-        single     = raw["path"]
-        paths_list = single if isinstance(single, list) else [single]
-        for p in paths_list:
-            parsed_paths.append(PathConfig(
-                path          = p,
-                type          = lib_type,
-                min_files     = lib_min_files,
-                min_threshold = lib_min_threshold,
-            ))
-
-    return LibraryConfig(
-        name       = raw["name"],
-        type       = lib_type,
-        paths      = parsed_paths,
-        cron       = cron,
-        section_id = raw.get("section_id", None),
-    )
-
-
-def _load_instance(raw: dict) -> PlexInstanceConfig:
-    safe  = raw["name"].upper().replace(" ", "_").replace("-", "_")
-    url   = os.environ.get(f"PLEX_URL_{safe}",   os.environ.get("PLEX_URL",   raw.get("url",   "")))
-    token = os.environ.get(f"PLEX_TOKEN_{safe}", os.environ.get("PLEX_TOKEN", raw.get("token", "")))
-    return PlexInstanceConfig(
-        name      = raw["name"],
-        url       = url,
-        token     = token,
-        libraries = [_load_library(lib) for lib in raw.get("libraries", [])],
-    )
-
-
-# ── Public loader ─────────────────────────────────────────────────────────────
-
-def load_config(path: str = "data/config.yml") -> AppConfig:
+def count_files(path: str) -> int:
     """
-    Load configuration. If config.yml does not exist the app still starts —
-    returns AppConfig with config_missing=True so the UI shows setup instructions
-    instead of an error.
+    Count symlinks and files under path without following symlinks.
+    For debrid/symlink libraries the symlinks themselves are the media items
+    so we count them directly rather than following into their targets.
     """
-    discord   = os.environ.get("DISCORD_WEBHOOK", "")
-    log_level = os.environ.get("LOG_LEVEL", "INFO")
-
+    total = 0
     if not os.path.exists(path):
-        logger.warning(
-            f"No config file found at '{path}'. "
-            "Mount a config.yml to get started. "
-            "UI will show setup instructions."
-        )
-        return AppConfig(
-            instances       = [],
-            discord_webhook = discord,
-            log_level       = log_level,
-            config_missing  = True,
-        )
+        return 0
+    for root, dirs, files in os.walk(path, followlinks=False):
+        # Count all files (includes symlinks reported as files)
+        total += len(files)
+        # Count directory symlinks (movie folders that are themselves symlinks)
+        total += sum(1 for d in dirs
+                     if os.path.islink(os.path.join(root, d)))
+    return total
 
-    with open(path, "r") as f:
-        raw = yaml.safe_load(f) or {}
 
-    discord   = os.environ.get("DISCORD_WEBHOOK", raw.get("discord_webhook", ""))
-    log_level = os.environ.get("LOG_LEVEL",       raw.get("log_level", "INFO"))
+def check_file_threshold(path: str, min_files: int,
+                          min_threshold: float, plex_count: int) -> Dict:
+    """
+    1. disk count must be >= min_files (absolute floor)
+    2. disk count must be >= min_threshold * plex_count (ratio)
+    """
+    disk_count = count_files(path)
 
-    notify_raw = raw.get("notify", {})
-    notify = NotifyConfig(
-        on_success = notify_raw.get("on_success", False),
-        on_failure = notify_raw.get("on_failure", True),
-        on_skip    = notify_raw.get("on_skip",    True),
-    )
+    if disk_count < min_files:
+        return {
+            "pass":       False,
+            "disk_count": disk_count,
+            "plex_count": plex_count,
+            "detail":     (f"Only {disk_count} files on disk, "
+                           f"minimum floor is {min_files}")
+        }
 
-    instances = [_load_instance(inst) for inst in raw.get("plex_instances", [])]
+    if plex_count > 0:
+        ratio = disk_count / plex_count
+        if ratio < min_threshold:
+            return {
+                "pass":       False,
+                "disk_count": disk_count,
+                "plex_count": plex_count,
+                "detail":     (f"Ratio {ratio*100:.1f}% below threshold "
+                               f"{min_threshold*100:.0f}% "
+                               f"({disk_count} on disk / {plex_count} in Plex)")
+            }
+        return {
+            "pass":       True,
+            "disk_count": disk_count,
+            "plex_count": plex_count,
+            "detail":     (f"OK: {ratio*100:.1f}% "
+                           f"({disk_count} on disk / {plex_count} in Plex)")
+        }
 
-    if not instances:
-        logger.warning("config.yml loaded but no plex_instances defined.")
-
-    return AppConfig(
-        instances       = instances,
-        discord_webhook = discord,
-        notify          = notify,
-        log_level       = log_level,
-        config_missing  = False,
-    )
+    return {
+        "pass":       True,
+        "disk_count": disk_count,
+        "plex_count": 0,
+        "detail":     f"{disk_count} files on disk (Plex count unavailable)"
+    }
