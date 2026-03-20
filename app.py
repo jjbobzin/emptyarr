@@ -348,7 +348,6 @@ def api_wizard_save():
                 path_cfg = {
                     "path":          p.get("path", ""),
                     "type":          p.get("type", "physical"),
-                    "min_files":     int(p.get("min_files", 50)),
                     "min_threshold": int(p.get("min_threshold", 90)),
                 }
                 pcs = p.get("provider_checks", [])

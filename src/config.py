@@ -21,8 +21,7 @@ class ProviderCheck:
 class PathConfig:
     path: str
     type: str                                    # physical | debrid | usenet
-    min_files: int = 50
-    min_threshold: float = 0.90
+    min_threshold: float = 0.90                  # ratio check — 0.90 = 90%
     provider_checks: List[ProviderCheck] = field(default_factory=list)
 
 
@@ -90,14 +89,13 @@ def _load_provider_checks(raw: list) -> List[ProviderCheck]:
 
 
 def _load_path(raw: dict, lib_type: str,
-               lib_min_files: int, lib_min_threshold: float) -> PathConfig:
+               lib_min_threshold: float) -> PathConfig:
     pc_raw = raw.get("provider_checks", raw.get("provider_check", None))
     if isinstance(pc_raw, dict):
         pc_raw = [pc_raw]
     return PathConfig(
         path            = raw["path"],
         type            = raw.get("type", lib_type),
-        min_files       = int(raw.get("min_files", lib_min_files)),
         min_threshold   = float(raw.get("min_threshold", lib_min_threshold * 100)) / 100.0,
         provider_checks = _load_provider_checks(pc_raw or []),
     )
@@ -105,7 +103,6 @@ def _load_path(raw: dict, lib_type: str,
 
 def _load_library(raw: dict) -> LibraryConfig:
     lib_type          = raw.get("type", "physical")
-    lib_min_files     = int(raw.get("min_files", 50))
     lib_min_threshold = float(raw.get("min_threshold", 90)) / 100.0
     cron              = raw.get("cron", "0 * * * *")
     raw_paths         = raw.get("paths", [])
@@ -116,11 +113,10 @@ def _load_library(raw: dict) -> LibraryConfig:
             parsed_paths.append(PathConfig(
                 path          = p,
                 type          = lib_type if lib_type != "mixed" else "physical",
-                min_files     = lib_min_files,
                 min_threshold = lib_min_threshold,
             ))
         elif isinstance(p, dict):
-            parsed_paths.append(_load_path(p, lib_type, lib_min_files, lib_min_threshold))
+            parsed_paths.append(_load_path(p, lib_type, lib_min_threshold))
 
     # Shorthand: single path string at library level
     if not parsed_paths and raw.get("path"):
@@ -130,7 +126,6 @@ def _load_library(raw: dict) -> LibraryConfig:
             parsed_paths.append(PathConfig(
                 path          = p,
                 type          = lib_type,
-                min_files     = lib_min_files,
                 min_threshold = lib_min_threshold,
             ))
 

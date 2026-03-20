@@ -1,4 +1,6 @@
+import json
 import logging
+import os
 import threading
 from datetime import datetime
 from typing import Dict, List, Optional
@@ -17,6 +19,31 @@ _instance_status: Dict        = {}   # instance_name -> {library_name -> status}
 _last_global_checks: Dict     = {}   # instance_name -> {check_name -> result}
 _scheduling_enabled: bool     = True
 _lock = threading.Lock()
+
+_STATE_FILE = os.environ.get("STATE_FILE", "data/state.json")
+
+
+def _load_state():
+    global _scheduling_enabled
+    try:
+        if os.path.exists(_STATE_FILE):
+            with open(_STATE_FILE) as f:
+                state = json.load(f)
+                _scheduling_enabled = state.get("scheduling_enabled", True)
+    except Exception:
+        pass
+
+
+def _save_state():
+    try:
+        os.makedirs(os.path.dirname(_STATE_FILE), exist_ok=True)
+        with open(_STATE_FILE, "w") as f:
+            json.dump({"scheduling_enabled": _scheduling_enabled}, f)
+    except Exception:
+        pass
+
+
+_load_state()
 
 
 # ── State accessors ───────────────────────────────────────────────────────────
@@ -41,6 +68,7 @@ def set_scheduling_enabled(enabled: bool):
     global _scheduling_enabled
     with _lock:
         _scheduling_enabled = enabled
+    _save_state()
     logger.info(f"Scheduling {'enabled' if enabled else 'paused'}")
 
 
@@ -92,7 +120,7 @@ def _run_path_checks(path_cfg: PathConfig, plex_count: int) -> Dict:
 
     # 3. File threshold — always
     results[f"Files ({label})"] = check_file_threshold(
-        path_cfg.path, path_cfg.min_files, path_cfg.min_threshold, plex_count
+        path_cfg.path, path_cfg.min_threshold, plex_count
     )
 
     # 4. Provider API checks — optional, per provider configured on this path

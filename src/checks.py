@@ -4,26 +4,45 @@ from typing import Dict, List
 
 
 def check_mountpoint(path: str) -> Dict:
-    """Verify path is an actual mount point, not an empty local dir."""
-    try:
-        result = subprocess.run(
-            ["mountpoint", "-q", path],
-            capture_output=True, timeout=5
-        )
-        if result.returncode == 0:
-            return {"pass": True, "detail": f"Mounted: {path}"}
-        return {"pass": False, "detail": f"Not a mount point: {path}"}
-    except FileNotFoundError:
-        # mountpoint binary unavailable — fall back to existence + non-empty check
+    """
+    Verify path (or one of its parents) is an actual mount point.
+    Walks up the directory tree since media paths are often subdirectories
+    of the actual mount point rather than mount points themselves.
+    """
+    if not os.path.exists(path):
+        return {"pass": False, "detail": f"Path does not exist: {path}"}
+
+    # Walk up the tree to find the nearest mount point
+    check = path
+    while True:
         try:
-            entries = os.listdir(path)
-            if entries:
-                return {"pass": True, "detail": f"Path accessible: {path}"}
-            return {"pass": False, "detail": f"Path exists but is empty: {path}"}
+            result = subprocess.run(
+                ["mountpoint", "-q", check],
+                capture_output=True, timeout=5
+            )
+            if result.returncode == 0:
+                if check == path:
+                    return {"pass": True, "detail": f"Mounted: {path}"}
+                else:
+                    return {"pass": True, "detail": f"Path accessible via mount at {check}"}
+        except FileNotFoundError:
+            # mountpoint binary unavailable — just check path exists and is non-empty
+            try:
+                if os.path.exists(path) and os.listdir(path):
+                    return {"pass": True, "detail": f"Path accessible: {path}"}
+                elif os.path.exists(path):
+                    return {"pass": False, "detail": f"Path exists but is empty: {path}"}
+                return {"pass": False, "detail": f"Path does not exist: {path}"}
+            except Exception as e:
+                return {"pass": False, "detail": f"Path check error: {e}"}
         except Exception as e:
-            return {"pass": False, "detail": f"Path check error: {e}"}
-    except Exception as e:
-        return {"pass": False, "detail": f"Mountpoint check error: {e}"}
+            return {"pass": False, "detail": f"Mount check error: {e}"}
+
+        parent = os.path.dirname(check)
+        if parent == check:
+            # Reached filesystem root — path is accessible, just not a named mount
+            return {"pass": True, "detail": f"Path accessible: {path}"}
+        check = parent
 
 
 def check_symlinks(path: str, sample_size: int = 50) -> Dict:
@@ -104,21 +123,21 @@ def count_files(path: str) -> int:
     return total
 
 
-def check_file_threshold(path: str, min_files: int,
-                          min_threshold: float, plex_count: int) -> Dict:
+def check_file_threshold(path: str, min_threshold: float, plex_count: int) -> Dict:
     """
-    1. disk count must be >= min_files (absolute floor)
-    2. disk count must be >= min_threshold * plex_count (ratio)
+    Validate file count on disk:
+    1. Must have at least 10 files (absolute sanity floor — catches empty mounts)
+    2. Must be >= min_threshold * plex_count (percentage-based ratio check)
     """
     disk_count = count_files(path)
+    FLOOR = 10  # absolute minimum — catches completely empty/dead mounts
 
-    if disk_count < min_files:
+    if disk_count < FLOOR:
         return {
             "pass":       False,
             "disk_count": disk_count,
             "plex_count": plex_count,
-            "detail":     (f"Only {disk_count} files on disk, "
-                           f"minimum floor is {min_files}")
+            "detail":     f"Only {disk_count} files on disk (minimum sanity floor is {FLOOR})"
         }
 
     if plex_count > 0:

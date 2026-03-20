@@ -899,10 +899,9 @@ async function loadSettings() {
         type:  lib.type  || 'physical',
         cron:  lib.cron  || '0 * * * *',
         paths: (lib.paths || []).map(p => ({
-          path:          p.path          || '',
-          type:          p.type          || 'physical',
-          min_files:     p.min_files     ?? 50,
-          min_threshold: p.min_threshold ?? 90,
+          path:            p.path          || '',
+          type:            p.type          || 'physical',
+          min_threshold:   p.min_threshold ?? 90,
           provider_checks: p.provider_checks || [],
         }))
       }))
@@ -1022,8 +1021,9 @@ function renderSettingsLibraries(libs, ii) {
                 </select>
               </div>
               <div class="form-group" style="margin-bottom:0;">
-                <label class="form-label">Min Files</label>
-                <input class="form-input" type="number" id="apf-min-${ii}-${li}" value="50" min="1" />
+                <label class="form-label">Threshold %</label>
+                <input class="form-input" type="number" id="apf-thr-${ii}-${li}" value="90" min="1" max="100" />
+                <div class="form-hint">Min % of Plex count that must be on disk</div>
               </div>
             </div>
             <div class="form-group">
@@ -1050,7 +1050,7 @@ function renderPathItems(paths, ii, li) {
     <div class="path-item">
       <span class="path-item-type">${p.type}</span>
       <span class="path-item-path">${p.path}</span>
-      <span class="path-item-min">${p.min_files} min</span>
+      <span class="path-item-min">${p.min_threshold ?? 90}% threshold</span>
       <button class="btn btn-danger btn-xs" onclick="removePath(${ii},${li},${pi})" style="padding:2px 7px;flex-shrink:0;">✕</button>
     </div>`).join('');
 }
@@ -1093,11 +1093,11 @@ function showAddPathForm(ii, li) {
 }
 
 function addPath(ii, li) {
-  const path   = document.getElementById(`apf-path-${ii}-${li}`).value.trim();
-  const type   = document.getElementById(`apf-type-${ii}-${li}`).value;
-  const minFiles = parseInt(document.getElementById(`apf-min-${ii}-${li}`).value) || 50;
+  const path      = document.getElementById(`apf-path-${ii}-${li}`).value.trim();
+  const type      = document.getElementById(`apf-type-${ii}-${li}`).value;
+  const threshold = parseInt(document.getElementById(`apf-thr-${ii}-${li}`).value) || 90;
   if (!path) { toast('Enter a path', 'fail'); return; }
-  const pathObj = { path, type, min_files: minFiles, min_threshold: 90 };
+  const pathObj = { path, type, min_threshold: threshold };
   if (type === 'debrid' || type === 'usenet') pathObj.provider_checks = [];
   _settingsData.instances[ii].libraries[li].paths.push(pathObj);
   document.getElementById(`si-paths-${ii}-${li}`).innerHTML = renderPathItems(_settingsData.instances[ii].libraries[li].paths, ii, li);
@@ -1380,8 +1380,8 @@ function renderWiz2(body, next) {
           <div class="form-row" style="margin-bottom:10px;">
             <div class="form-group" style="margin-bottom:0;"><label class="form-label">Type</label>
               <select class="form-input" id="wpt-${ii}-${li}"><option value="physical">physical</option><option value="debrid">debrid</option></select></div>
-            <div class="form-group" style="margin-bottom:0;"><label class="form-label">Min Files</label>
-              <input class="form-input" type="number" id="wpm-${ii}-${li}" value="50" /></div>
+            <div class="form-group" style="margin-bottom:0;"><label class="form-label">Threshold %</label>
+              <input class="form-input" type="number" id="wpm-${ii}-${li}" value="90" min="1" max="100" /></div>
           </div>
           <div class="form-group">
             <label class="form-label">Path</label>
@@ -1405,9 +1405,9 @@ function openWizBrowser(ii,li){_browserCb=(p)=>{document.getElementById(`wpp-${i
 function addWizPath(ii,li){
   const path=document.getElementById(`wpp-${ii}-${li}`).value.trim();
   const type=document.getElementById(`wpt-${ii}-${li}`).value;
-  const min=parseInt(document.getElementById(`wpm-${ii}-${li}`).value)||50;
+  const thr=parseInt(document.getElementById(`wpm-${ii}-${li}`).value)||90;
   if(!path){toast('Enter a path','fail');return;}
-  const p={path,type,min_files:min,min_threshold:90};
+  const p={path,type,min_threshold:thr};
   if(type==='debrid'||type==='usenet') p.provider_checks=[];
   _wizData.instances[ii].libraries[li].paths.push(p);
   document.getElementById(`wp-${ii}-${li}`).innerHTML=renderPathItems(_wizData.instances[ii].libraries[li].paths,ii,li);
