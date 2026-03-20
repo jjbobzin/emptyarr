@@ -418,19 +418,22 @@ def api_config_load():
 @require_auth
 def api_debug_trash(instance_name: str, section_id: str):
     """Debug endpoint — shows raw trash item counts per type level."""
+    import requests as _requests
     inst = next((i for i in config.instances if i.name == instance_name), None)
     if not inst:
         return jsonify({"error": "instance not found"}), 404
-    plex = plex_clients[inst.name]
+    plex   = plex_clients[inst.name]
     result = {}
-    for type_id in [1, 2, 3, 4]:
+    for type_id in [2, 3, 4]:
         try:
-            r = plex._get(
-                f"/library/sections/{section_id}/all",
-                params={"checkFiles": 1, "type": type_id},
+            # Test with token as query param (curl-style)
+            r = _requests.get(
+                f"{plex.url}/library/sections/{section_id}/all",
+                params={"checkFiles": 1, "type": type_id, "X-Plex-Token": plex.token},
+                headers={"Accept": "application/json"},
                 timeout=120,
             )
-            items = r.json().get("MediaContainer", {}).get("Metadata", [])
+            items   = r.json().get("MediaContainer", {}).get("Metadata", [])
             deleted = [i for i in items if i.get("deletedAt")]
             result[f"type_{type_id}"] = {
                 "total_returned": len(items),
@@ -439,6 +442,7 @@ def api_debug_trash(instance_name: str, section_id: str):
             }
         except Exception as e:
             result[f"type_{type_id}"] = {"error": str(e)}
+    return jsonify(result)
     return jsonify(result)
 
 

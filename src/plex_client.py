@@ -73,14 +73,19 @@ class PlexClient:
     def _fetch_deleted(self, section_id: str, type_id: int) -> List[Dict]:
         """
         Fetch all items with deletedAt set for a given type.
-        Uses a single unlimited request — Plex only includes deletedAt in
-        full responses, not paginated ones (confirmed behavior).
-        Uses a long timeout to handle large libraries (e.g. 13k+ episodes).
+        IMPORTANT: Token must be passed as query param (not header) for
+        checkFiles=1 to include deletedAt on episode-level items in Plex.
         """
         try:
-            r = self._get(
-                f"/library/sections/{section_id}/all",
-                params={"checkFiles": 1, "type": type_id},
+            # Use requests directly (not self.session) so token goes as query param
+            r = requests.get(
+                f"{self.url}/library/sections/{section_id}/all",
+                params={
+                    "checkFiles":    1,
+                    "type":          type_id,
+                    "X-Plex-Token":  self.token,
+                },
+                headers={"Accept": "application/json"},
                 timeout=120,
             )
             if r.status_code != 200:
