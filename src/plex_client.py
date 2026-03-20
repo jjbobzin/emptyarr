@@ -1,11 +1,19 @@
 import requests
+import xml.etree.ElementTree as ET
 from typing import Optional, List, Dict
 
 
 # Plex media type IDs
-_MOVIE_TYPES = [1]           # movie
-_TV_TYPES    = [2, 3, 4]     # show, season, episode
-_MUSIC_TYPES = [8, 9, 10]    # artist, album, track
+_MOVIE_TYPES = [1]        # movie
+_TV_TYPES    = [2, 3, 4]  # show, season, episode
+
+# Human-readable labels for type IDs
+_TYPE_LABELS = {
+    1: "movie",
+    2: "show",
+    3: "season",
+    4: "episode",
+}
 
 
 class PlexClient:
@@ -51,7 +59,6 @@ class PlexClient:
         return None
 
     def get_section_type(self, section_id: str) -> str:
-        """Return the section type string — 'movie', 'show', etc."""
         try:
             for s in self.get_sections():
                 if s["id"] == section_id:
@@ -64,21 +71,37 @@ class PlexClient:
         try:
             r = self._get(f"/library/sections/{section_id}/all",
                           params={"X-Plex-Container-Start": 0,
-                                  "X-Plex-Container-Size": 0})
+                                  "X-Plex-Container-Size":  0})
             r.raise_for_status()
             return int(r.json().get("MediaContainer", {}).get("totalSize", 0))
         except Exception:
             return 0
 
-    def _fetch_deleted(self, section_id: str, type_id: int) -> List[Dict]:
+    def _quick_has_deleted(self, section_id: str) -> bool:
         """
-        Fetch all items with deletedAt set for a given type.
-        For shows/episodes, deletedAt lives on the <Media> child element,
-        not on the <Video> parent. Must use XML (not JSON) and token as
-        query param — Plex omits deletedAt from JSON responses for episodes.
+        Fast check — uses JSON to see if ANY items have deletedAt set.
+        JSON omits deletedAt on episode Media children but does include it
+        on show/season level items. So if this returns True we definitely
+        have deleted items; if False we still do the full XML check since
+        episode-level deletions won't show here.
+        Actually used to short-circuit: if JSON shows deletedAt on ANY
+        top-level item, we know we need the full XML scan.
+        We always do the XML scan — this just tells us we can skip it
+        when the library is completely clean at show/season level AND
+        we've recently confirmed no episode deletions.
+        For now: always return True to always do full scan.
+        Optimization opportunity: cache the last scan result.
+        """
+        return True  # Always do full scan for accuracy
+
+    def _fetch_deleted_xml(self, section_id: str, type_id: int) -> List[Dict]:
+        """
+        Fetch items with deletedAt using XML (required — JSON omits deletedAt
+        on Media children for episodes). Checks both item-level and
+        Media child-level deletedAt.
+        Returns list of {title, year, type, deleted_at, media_type_id}.
         """
         try:
-            import xml.etree.ElementTree as ET
             r = requests.get(
                 f"{self.url}/library/sections/{section_id}/all",
                 params={
@@ -93,25 +116,26 @@ class PlexClient:
             root    = ET.fromstring(r.text)
             deleted = []
             for item in list(root):
-                tag = item.tag  # Video, Directory, Track, etc.
                 # Check deletedAt on the item itself (shows, seasons)
                 if item.get("deletedAt"):
                     deleted.append({
-                        "title":      item.get("title", "Unknown"),
-                        "year":       item.get("year", ""),
-                        "type":       item.get("type", tag.lower()),
-                        "deleted_at": int(item.get("deletedAt", 0)),
+                        "title":         item.get("title", "Unknown"),
+                        "year":          item.get("year", ""),
+                        "type":          _TYPE_LABELS.get(type_id, "item"),
+                        "deleted_at":    int(item.get("deletedAt", 0)),
+                        "media_type_id": type_id,
                     })
                 else:
-                    # Check deletedAt on Media children (episodes with
-                    # unavailable/replaced files)
+                    # Check deletedAt on <Media> children (episodes with
+                    # unavailable/replaced file versions)
                     for media in item.findall("Media"):
                         if media.get("deletedAt"):
                             deleted.append({
-                                "title":      item.get("title", "Unknown"),
-                                "year":       item.get("year", ""),
-                                "type":       item.get("type", tag.lower()),
-                                "deleted_at": int(media.get("deletedAt", 0)),
+                                "title":         item.get("title", "Unknown"),
+                                "year":          item.get("year", ""),
+                                "type":          _TYPE_LABELS.get(type_id, "item"),
+                                "deleted_at":    int(media.get("deletedAt", 0)),
+                                "media_type_id": type_id,
                             })
                             break  # one entry per episode
             return deleted
@@ -120,21 +144,23 @@ class PlexClient:
 
     def get_trash_items(self, section_id: str) -> List[Dict]:
         """
-        Get items that will be removed by emptyTrash.
-        Uses checkFiles=1 + deletedAt detection with pagination to handle
-        large libraries. Queries all relevant type levels for TV/movie sections.
+        Get all items that will be removed by emptyTrash.
+        Returns list of items with type info for breakdown reporting.
         """
         try:
             section_type = self.get_section_type(section_id)
             type_ids     = _TV_TYPES if section_type == "show" else _MOVIE_TYPES
 
-            all_items  = []
+            all_items   = []
             seen_titles = set()
 
             for type_id in type_ids:
-                for item in self._fetch_deleted(section_id, type_id):
-                    all_items.append(item)
-                    seen_titles.add(item["title"])
+                for item in self._fetch_deleted_xml(section_id, type_id):
+                    # Deduplicate by title+type
+                    key = f"{item['title']}_{item['type']}"
+                    if key not in seen_titles:
+                        all_items.append(item)
+                        seen_titles.add(key)
 
             # Also check legacy trash=1 endpoint and merge
             try:
@@ -144,11 +170,13 @@ class PlexClient:
                 )
                 if r_legacy.status_code == 200:
                     for item in r_legacy.json().get("MediaContainer", {}).get("Metadata", []):
-                        if item.get("title") not in seen_titles:
+                        key = f"{item.get('title', '')}_{item.get('type', '')}"
+                        if key not in seen_titles:
                             all_items.append({
                                 "title": item.get("title", "Unknown"),
                                 "year":  item.get("year", ""),
                                 "type":  item.get("type", ""),
+                                "media_type_id": 0,
                             })
             except Exception:
                 pass

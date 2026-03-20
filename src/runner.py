@@ -75,16 +75,19 @@ def set_scheduling_enabled(enabled: bool):
 # ── History recording ─────────────────────────────────────────────────────────
 
 def _record(instance_name: str, library_name: str, status: str,
-            checks: Dict, message: str, removed_items: List[Dict] = None):
+            checks: Dict, message: str, removed_items: List[Dict] = None,
+            removed_count: int = None):
+    items = removed_items or []
+    count = removed_count if removed_count is not None else len(items)
     record = {
         "timestamp":     datetime.now().isoformat(),
         "instance":      instance_name,
         "library":       library_name,
-        "status":        status,   # success | skipped | error | dry_run
+        "status":        status,
         "checks":        checks,
         "message":       message,
-        "removed_items": removed_items or [],
-        "removed_count": len(removed_items or []),
+        "removed_items": items,
+        "removed_count": count,
     }
     with _lock:
         _history.insert(0, record)
@@ -96,7 +99,7 @@ def _record(instance_name: str, library_name: str, status: str,
             "last_run":      record["timestamp"],
             "last_status":   status,
             "last_message":  message,
-            "removed_count": record["removed_count"],
+            "removed_count": count,
         }
     return record
 
@@ -238,19 +241,44 @@ def run_library(instance: PlexInstanceConfig, library: LibraryConfig,
                                          failed, all_checks)
         return
 
-    # Snapshot trash
-    trash_items = plex.get_trash_items(section_id)
-    trash_count = len(trash_items)
+    # Snapshot trash — try to get item list for display
+    trash_items  = plex.get_trash_items(section_id)
+    trash_count  = len(trash_items)
+
+    # Build breakdown by type for clear messaging
+    def _breakdown(items):
+        counts = {}
+        for item in items:
+            t = item.get("type", "item")
+            counts[t] = counts.get(t, 0) + 1
+        # Order: episodes first, then seasons, shows, movies, other
+        order = ["episode", "season", "show", "movie"]
+        parts = []
+        for k in order:
+            if k in counts:
+                parts.append(f"{counts[k]} {k}{'s' if counts[k] != 1 else ''}")
+        for k, v in counts.items():
+            if k not in order:
+                parts.append(f"{v} {k}{'s' if v != 1 else ''}")
+        return ", ".join(parts) if parts else f"{len(items)} item(s)"
+
+    # Episode count is the headline number for the tile
+    episode_count = sum(1 for i in trash_items if i.get("type") == "episode")
+    headline_count = episode_count if episode_count > 0 else trash_count
 
     if dry_run:
-        msg = (f"[DRY RUN] Would remove {trash_count} item(s) from trash — no action taken"
-               if trash_count > 0 else "[DRY RUN] Trash is already empty")
+        if trash_count > 0:
+            breakdown = _breakdown(trash_items)
+            msg = f"[DRY RUN] Would remove {breakdown} from trash — no action taken"
+        else:
+            msg = "[DRY RUN] Trash is already empty"
         logger.info(f"[{instance.name} / {library.name}] {msg}")
-        _record(instance.name, library.name, "dry_run", all_checks, msg, trash_items)
+        _record(instance.name, library.name, "dry_run", all_checks, msg,
+                trash_items, removed_count=headline_count)
         return
 
     logger.info(f"[{instance.name} / {library.name}] "
-                f"{trash_count} item(s) in trash, emptying…")
+                f"{_breakdown(trash_items)} in trash snapshot, emptying…")
     result = plex.empty_trash(section_id)
 
     if not result["ok"]:
@@ -259,12 +287,22 @@ def run_library(instance: PlexInstanceConfig, library: LibraryConfig,
         _record(instance.name, library.name, "error", all_checks, msg, trash_items)
         return
 
-    msg = (f"Emptied {trash_count} item(s) from trash"
-           if trash_count > 0 else "Trash was already empty")
-    logger.info(f"[{instance.name} / {library.name}] {msg}")
-    _record(instance.name, library.name, "success", all_checks, msg, trash_items)
+    if trash_count > 0:
+        breakdown = _breakdown(trash_items)
+        msg = f"Emptied {breakdown} from trash"
+    else:
+        msg = "Trash was already empty"
 
-    if config.notify.on_success and config.discord_webhook:
+    logger.info(f"[{instance.name} / {library.name}] {msg}")
+    _record(instance.name, library.name, "success", all_checks, msg,
+            trash_items if trash_items else [],
+            removed_count=headline_count if trash_count > 0 else 0)
+
+    if config.notify.on_success and config.discord_webhook and trash_count > 0:
         notifications.notify_success(config.discord_webhook,
                                      instance.name, library.name,
                                      trash_items, all_checks)
+    elif config.notify.on_success and config.discord_webhook and trash_count == 0:
+        notifications.notify_success(config.discord_webhook,
+                                     instance.name, library.name,
+                                     [], all_checks)
