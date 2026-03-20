@@ -1,232 +1,186 @@
 # emptyarr
 
-Safely empties Plex library trash by validating mount health before acting.
-Supports multiple Plex instances, mixed physical/debrid libraries,
-per-library cron schedules, dry runs, and Discord notifications.
+**Plex trash watchdog** — validates mount health before emptying library trash.
 
-## How it works
+emptyarr runs on a cron schedule, checks that your media paths are healthy, then safely empties Plex library trash. It supports multiple Plex instances, physical and debrid libraries, per-library schedules, Discord notifications, and a web UI.
 
-Each library run:
-1. Checks Plex is reachable
-2. Per path: mountpoint → symlink resolution (debrid/usenet) → file threshold
-3. Optionally pings debrid provider APIs (Real-Debrid, AllDebrid, Torbox, Debrid-Link)
-4. If all checks pass: snapshots trash → calls emptyTrash → records removed titles
-5. If any check fails: skips, optionally sends Discord alert
-
-## Library types
-
-| Type | Mountpoint | Symlinks | File threshold | Provider API |
-|------|-----------|----------|---------------|-------------|
-| `physical` | ✅ | ❌ | ✅ | ❌ |
-| `debrid` | ✅ | ✅ | ✅ | optional |
-| `usenet` | ✅ | ✅ | ✅ | optional |
-| `mixed` | per path | per path | per path | per path |
+![emptyarr dashboard](https://raw.githubusercontent.com/jjbobzin/emptyarr/main/static/icon-192.png)
 
 ---
 
-## Configuration — two tiers
+## Features
 
-### Tier 1: config.yml (structure)
+- **Health checks before every empty** — mountpoint validation, symlink resolution, file count ratio
+- **Multiple Plex instances** — manage Streamstead, Streamstead-Unlimited, or any number of servers
+- **Library types** — `physical`, `debrid`, `usenet`, `mixed` (combined threshold check)
+- **Per-library cron schedules** — each library runs on its own schedule
+- **Dry run mode** — see what would be removed without taking action
+- **Discord notifications** — on success, failure, or skip
+- **Web UI** — dashboard, run history with expandable check details, settings editor
+- **Optional auth** — set username/password via the Settings UI
+- **Light/dark theme** — toggle in the nav bar
 
-Controls everything about your Plex instances and libraries:
-- Plex instance names and URLs
-- Library names, paths, types
-- min_files, min_threshold per path
-- Cron schedules per library
-- Notify preferences
+---
 
-Copy the example and fill in your values:
+## Quick Start (Unraid)
+
+### 1. Build the image
+
 ```bash
-cp data/config.yml.example data/config.yml
+cd /mnt/cache/appdata/emptyarr
+git clone https://github.com/jjbobzin/emptyarr.git .
+docker build -t emptyarr:latest .
 ```
 
-### Tier 2: Environment variables (secrets)
+### 2. Add the container in Unraid Docker UI
 
-Tokens and API keys set in the Unraid Docker UI or `.env` file.
-These **override** any matching values in config.yml.
+| Field | Value |
+|---|---|
+| Name | `emptyarr` |
+| Repository | `emptyarr:latest` |
+| Network | `arr_net` (or your arr network) |
+| Port | `8222` → `8222` |
+
+**Path mappings:**
+
+| Host | Container | Mode |
+|---|---|---|
+| `/mnt/cache/appdata/emptyarr/data` | `/app/data` | Read/Write |
+| `/mnt/symlink_media` | `/symlink_media` | Read Only |
+| `/mnt/user/media` | `/mnt/user/media` | Read Only |
+
+> **Note on symlink paths:** The container path for symlink media must match what your symlinks actually point to. Check with `ls -la /mnt/symlink_media/symlinks/radarr/ | head -3` — if the targets start with `/symlink_media/` (no `/mnt`), use `/symlink_media` as the container path.
+
+**Environment variables:**
 
 | Variable | Description |
-|----------|-------------|
-| `PUID` | User ID to run as — `99` (nobody) on Unraid |
-| `PGID` | Group ID to run as — `100` (users) on Unraid |
-| `PLEX_TOKEN_{NAME}` | Token per instance — e.g. `PLEX_TOKEN_MY_PLEX` |
-| `PLEX_URL_{NAME}` | URL per instance (optional override) |
-| `RD_API_KEY` | Real-Debrid API key |
-| `AD_API_KEY` | AllDebrid API key |
-| `TB_API_KEY` | Torbox API key |
-| `DL_API_KEY` | Debrid-Link API key |
-| `DISCORD_WEBHOOK` | Discord webhook URL |
-| `TZ` | Timezone e.g. `America/Denver` |
-| `LOG_LEVEL` | `DEBUG` / `INFO` / `WARNING` / `ERROR` |
+|---|---|
+| `PUID` | `99` (Unraid nobody) |
+| `PGID` | `100` (Unraid users) |
+| `TZ` | e.g. `America/Denver` |
+| `PLEX_TOKEN_<NAME>` | Plex token per instance (optional — can set via UI instead) |
 
-The instance name in the variable matches the `name` field in config.yml,
-uppercased with spaces and hyphens replaced by underscores:
-- `"My Plex"` → `PLEX_TOKEN_MY_PLEX`
-- `"Plex-4K"` → `PLEX_TOKEN_PLEX_4K`
-- `"HomeServer"` → `PLEX_TOKEN_HOMESERVER`
+Tokens are named by instance: `PLEX_TOKEN_STREAMSTEAD`, `PLEX_TOKEN_STREAMSTEAD_UNLIMITED`, etc. (uppercase, spaces/hyphens replaced with underscores).
+
+### 3. Open the UI and run the setup wizard
+
+Navigate to `http://YOUR_UNRAID_IP:8222` and click **Open Setup Wizard**.
 
 ---
 
-## Setup on Unraid
+## Configuration
 
-### Step 1 — Create the config file
+Config is stored at `/app/data/config.yml` (mapped to your host's data directory). You can edit it via the **Settings** page in the UI, or directly in the file.
 
-The config file must exist **before** starting the container. If it doesn't
-exist when Docker mounts it, Docker creates a directory instead of a file
-and the container won't start correctly.
+### Example config.yml
 
-```bash
-# SSH into Unraid or use the terminal
-mkdir -p /mnt/cache/appdata/emptyarr
-cp /path/to/emptyarr/data/config.yml.example /mnt/cache/appdata/emptyarr/config.yml
-nano /mnt/cache/appdata/emptyarr/config.yml
-```
-
-Fill in your Plex instance URLs, library names, and paths.
-Leave tokens blank in config.yml — set them as env vars in the Docker UI instead.
-
-### Step 2 — Get your Plex section IDs (optional)
-
-emptyarr auto-discovers section IDs by library name, but you can hardcode
-them in config.yml to skip the lookup on each run:
-
-```
-# First Plex instance
-http://192.168.1.100:32400/library/sections?X-Plex-Token=YOUR_TOKEN
-
-# Second Plex instance
-http://192.168.1.100:32410/library/sections?X-Plex-Token=YOUR_TOKEN
-```
-
-Look for `key="1"` on each `<Directory>` element.
-
-### Step 3 — Get your min_files values
-
-Run these on Unraid to count your actual file counts:
-```bash
-find /mnt/symlink_media/symlinks/movie -type f | wc -l
-find /mnt/symlink_media/symlinks/tv -type f | wc -l
-find /mnt/user/media/usenet/movies -type f | wc -l
-find /mnt/user/media/usenet/tv -type f | wc -l
-```
-Set `min_files` to ~10% of these numbers as a safe floor.
-
-### Step 4 — Add the container
-
-**Option A: Community Applications (easiest)**
-
-Search for `emptyarr` in the CA app store. Fill in the fields — secrets
-go in the masked variable fields, the config.yml path mapping points to
-where you created the file in Step 1.
-
-**Option B: Manual via Docker UI**
-
-Unraid → Docker → Add Container:
-- Repository: `ghcr.io/jjbobzin/emptyarr:latest`
-- Name: `emptyarr`
-- Port: `8222` → `8222`
-
-Add path mappings:
-
-| Host path | Container path | Mode |
-|-----------|---------------|------|
-| `/mnt/cache/appdata/emptyarr/config.yml` | `/app/data/config.yml` | ro |
-| `/mnt/symlink_media/symlinks/movie` | `/media/symlinks/movie` | ro |
-| `/mnt/symlink_media/symlinks/tv` | `/media/symlinks/tv` | ro |
-| `/mnt/user/media/usenet/movies` | `/media/physical/movies` | ro |
-| `/mnt/user/media/usenet/tv` | `/media/physical/tv` | ro |
-| `/mnt/symlink_media/decypharr/mount` | `/mnt/symlink_media/decypharr/mount` | ro |
-
-Add environment variables (use the masked/password type for tokens):
-- `PLEX_TOKEN_MY_PLEX` (rename to match your instance name)
-- `PLEX_TOKEN_MY_OTHER_PLEX` (if you have a second instance)
-- `RD_API_KEY`
-- `DISCORD_WEBHOOK`
-- `TZ` = `America/New_York`
-
-**Option C: docker compose (local/dev)**
-
-```bash
-cp .env.example .env
-# Fill in .env with your tokens
-docker compose up -d --build
-```
-
-### Step 5 — First run
-
-Open `http://YOUR_UNRAID_IP:8222`
-
-1. Click **check** — pings Plex on all instances, no library action
-2. Click **◎ dry run** — runs all checks, shows what would be removed, no action
-3. Expand history rows to verify the right items show up in the trash snapshot
-4. Click **▶ run all** for the first real run
-
----
-
-## Volume mount — symlink resolution
-
-The most important thing to get right: **symlink targets must resolve inside the container.**
-
-Your symlinks in `/media/symlinks/movie` point to files somewhere under the
-Decypharr mount. That mount must be visible inside the container **at the
-exact path your symlinks reference**.
-
-Example: if a symlink at `/media/symlinks/movie/Film (2020)/film.mkv`
-points to `/mnt/symlink_media/decypharr/mount/__all__/film.mkv`, then
-you need:
 ```yaml
-- /mnt/symlink_media/decypharr/mount:/mnt/symlink_media/decypharr/mount:ro
+discord_webhook: https://discord.com/api/webhooks/...
+notify:
+  on_success: true
+  on_failure: true
+  on_skip: true
+
+plex_instances:
+  - name: Streamstead
+    url: http://10.10.10.5:32400
+    token: ''   # use PLEX_TOKEN_STREAMSTEAD env var
+    libraries:
+      - name: Movies
+        type: physical
+        cron: "0 * * * *"
+        paths:
+          - path: /mnt/user/media/usenet/movies
+            type: physical
+            min_threshold: 90
+
+      - name: TV Shows
+        type: physical
+        cron: "0 * * * *"
+        paths:
+          - path: /mnt/user/media/usenet/tv
+            type: physical
+            min_threshold: 90
+
+  - name: Streamstead-Unlimited
+    url: http://10.10.10.5:32410
+    token: ''
+    libraries:
+      - name: Movies
+        type: mixed
+        cron: "0 * * * *"
+        paths:
+          - path: /mnt/user/media/usenet/movies
+            type: physical
+            min_threshold: 90
+          - path: /symlink_media/symlinks/radarr
+            type: debrid
+            min_threshold: 90
+
+      - name: TV Shows
+        type: debrid
+        cron: "0 * * * *"
+        paths:
+          - path: /symlink_media/symlinks/sonarr
+            type: debrid
+            min_threshold: 90
 ```
 
-If the paths don't match, every symlink will appear broken even when the
-mount is healthy, and emptyarr will never empty trash.
+### Library types
+
+| Type | Description | Checks run |
+|---|---|---|
+| `physical` | Standard files on disk | Mount, Files ratio |
+| `debrid` | Symlinked debrid content | Mount, Symlinks, Files ratio |
+| `usenet` | Usenet downloads | Mount, Symlinks, Files ratio |
+| `mixed` | Mix of physical + debrid | Mount + Symlinks per path, combined Files ratio |
+
+### Thresholds
+
+`min_threshold` is the minimum percentage of your Plex library count that must exist on disk before emptyarr will empty trash. Default is `90` (90%).
+
+For `mixed` libraries, emptyarr combines the file count across **all paths** and compares the total to the Plex count — so each individual path doesn't need to hold the full library.
+
+---
+
+## Health Checks
+
+Before emptying trash, emptyarr runs these checks for each configured path:
+
+1. **Mount** — walks up the directory tree to find the nearest mount point. Fails if the path doesn't exist.
+2. **Symlinks** — for debrid/usenet paths, samples symlinks and verifies they resolve to real files. Catches dead debrid mounts.
+3. **Files (ratio)** — counts files on disk and compares to Plex library count. Fails if ratio drops below `min_threshold`.
+4. **Files (combined)** — for `mixed` libraries, checks the sum of all paths vs Plex count.
+
+If any check fails, trash is **not** emptied and a notification is sent (if configured).
+
+---
+
+## Authentication
+
+Go to **Settings → Security** to set a username and password. Auth takes effect immediately — no container restart needed. Passwords are stored as SHA-256 hashes in `config.yml`.
+
+You can also set `EMPTYARR_USERNAME` and `EMPTYARR_PASSWORD` env vars instead (env vars take priority).
 
 ---
 
 ## Updating
 
 ```bash
-# On Unraid — pull latest and rebuild
 cd /mnt/cache/appdata/emptyarr
 git pull
-docker compose up -d --build
+docker build -t emptyarr:latest .
+# Restart container in Unraid UI
 ```
 
 ---
 
-## API
+## Privacy
 
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/` | GET | Web UI |
-| `/api/status` | GET | Full status, next runs, scheduling state |
-| `/api/history` | GET | Run history (last 100) |
-| `/api/checks` | GET | Plex reachability checks only, no action |
-| `/api/scheduling` | POST | `{"enabled": true/false}` pause/resume cron |
-| `/api/run/all` | POST | Trigger all libraries |
-| `/api/dryrun/all` | POST | Dry run all libraries |
-| `/api/run/{instance}/{library}` | POST | Trigger one library |
-| `/api/dryrun/{instance}/{library}` | POST | Dry run one library |
+emptyarr makes network requests **only** to services you configure: your Plex server, debrid provider APIs (if you set an API key), and your Discord webhook. No telemetry. No analytics. No phone-home. See [PRIVACY.md](PRIVACY.md).
 
 ---
 
-## Cron reference
+## License
 
-| Expression | Meaning |
-|------------|---------|
-| `*/30 * * * *` | Every 30 minutes |
-| `0 * * * *` | Every hour |
-| `0 */2 * * *` | Every 2 hours |
-| `0 2 * * *` | Daily at 2am |
-
----
-
-## min_files / min_threshold guidance
-
-**min_files** — absolute floor. If your mount dies, file count drops from
-thousands to ~0. Set this to ~10% of your library size so a catastrophic
-mount failure is caught immediately.
-
-**min_threshold** — ratio of disk files to Plex library count. `90` means
-there must be at least 90% as many files on disk as items in Plex. Catches
-partial mount failures while tolerating normal fluctuation from upgrades.
+MIT

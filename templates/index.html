@@ -1,6 +1,13 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
+<script>
+  // Apply theme before page renders to avoid flash
+  (function(){
+    var t = localStorage.getItem('emptyarr-theme') || 'dark';
+    document.documentElement.setAttribute('data-theme', t);
+  })();
+</script>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>emptyarr</title>
@@ -34,6 +41,30 @@
   --sans:      'Inter', sans-serif;
   --mono:      'JetBrains Mono', monospace;
   --nav-h:     52px;
+}
+
+/* ── Light theme ── */
+[data-theme="light"] {
+  --bg:        #f8fafc;
+  --bg2:       #f1f5f9;
+  --surface:   #ffffff;
+  --surface2:  #f8fafc;
+  --border:    #e2e8f0;
+  --border2:   #cbd5e1;
+  --text:      #475569;
+  --text2:     #64748b;
+  --bright:    #0f172a;
+  --muted:     #94a3b8;
+  --accent:    #6366f1;
+  --accent2:   #4f46e5;
+  --pass:      #059669;
+  --pass2:     #10b981;
+  --fail:      #dc2626;
+  --fail2:     #ef4444;
+  --warn:      #d97706;
+  --warn2:     #f59e0b;
+  --info:      #2563eb;
+  --info2:     #3b82f6;
 }
 *{box-sizing:border-box;margin:0;padding:0;}
 html{scroll-behavior:smooth;}
@@ -502,6 +533,7 @@ hr.divider{border:none;border-top:1px solid var(--border);margin:16px 0;}
     {% if auth_enabled %}
     <a href="/logout" class="btn btn-secondary btn-sm">Sign out</a>
     {% endif %}
+    <button class="btn btn-secondary btn-icon btn-sm" onclick="toggleTheme()" id="theme-btn" title="Toggle light/dark">🌙</button>
   </div>
 </nav>
 
@@ -1624,6 +1656,23 @@ async function fetchStatus() {
 async function fetchHistory() {
   try { const r = await fetch('/api/history'); _history = await r.json(); renderHistory(_history); } catch(e) {}
 }
+
+// ── Theme ─────────────────────────────────────────────────────────────────────
+function applyTheme(theme) {
+  document.documentElement.setAttribute('data-theme', theme);
+  const btn = document.getElementById('theme-btn');
+  if (btn) btn.textContent = theme === 'light' ? '🌙' : '☀️';
+  localStorage.setItem('emptyarr-theme', theme);
+}
+function toggleTheme() {
+  const current = document.documentElement.getAttribute('data-theme') || 'dark';
+  applyTheme(current === 'dark' ? 'light' : 'dark');
+}
+// Apply saved theme immediately
+(function() {
+  const saved = localStorage.getItem('emptyarr-theme') || 'dark';
+  applyTheme(saved);
+})();
 
 // ── Init ──────────────────────────────────────────────────────────────────────
 if (!_configMissing) {
