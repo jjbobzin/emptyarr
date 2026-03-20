@@ -64,6 +64,8 @@ class AppConfig:
     notify: NotifyConfig = field(default_factory=NotifyConfig)
     log_level: str = "INFO"
     config_missing: bool = False    # True when no config.yml — UI shows setup prompt
+    auth_username: str = ""
+    auth_password_hash: str = ""    # SHA-256 hash, set via Settings UI
 
 
 # ── Internal helpers ──────────────────────────────────────────────────────────
@@ -197,15 +199,21 @@ def load_config(path: str = "data/config.yml") -> AppConfig:
         on_skip    = notify_raw.get("on_skip",    True),
     )
 
+    auth_raw = raw.get("auth", {})
+    auth_username      = auth_raw.get("username", "")
+    auth_password_hash = auth_raw.get("password_hash", "")
+
     instances = [_load_instance(inst) for inst in raw.get("plex_instances", [])]
 
     if not instances:
         logger.warning("config.yml loaded but no plex_instances defined.")
 
     return AppConfig(
-        instances       = instances,
-        discord_webhook = discord,
-        notify          = notify,
-        log_level       = log_level,
-        config_missing  = False,
+        instances           = instances,
+        discord_webhook     = discord,
+        notify              = notify,
+        log_level           = log_level,
+        config_missing      = False,
+        auth_username       = auth_username,
+        auth_password_hash  = auth_password_hash,
     )

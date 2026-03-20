@@ -605,6 +605,9 @@ hr.divider{border:none;border-top:1px solid var(--border);margin:16px 0;}
         <button class="settings-nav-item" onclick="showSettingsSection('notifications',this)">
           🔔 Notifications
         </button>
+        <button class="settings-nav-item" onclick="showSettingsSection('security',this)">
+          🔒 Security
+        </button>
         <button class="settings-nav-item" onclick="showSettingsSection('about',this)">
           ℹ️ About
         </button>
@@ -666,6 +669,59 @@ hr.divider{border:none;border-top:1px solid var(--border);margin:16px 0;}
           💾 Save Configuration
         </button>
         <span id="settings-save-result2" style="margin-left:12px;font-size:12px;"></span>
+      </div>
+
+      <!-- Security -->
+      <div class="settings-section" id="ss-security">
+        <div class="settings-section-title">Security</div>
+        <div class="settings-section-desc">Set a username and password to protect the emptyarr UI. Leave blank to disable authentication.</div>
+
+        <div id="auth-status-banner" style="margin-bottom:16px;"></div>
+
+        <div class="card" style="margin-bottom:16px;">
+          <div class="card-header"><span class="card-title">Login Credentials</span></div>
+          <div class="card-body">
+            <div class="form-row">
+              <div class="form-group">
+                <label class="form-label">Username</label>
+                <input class="form-input" id="s-auth-user" placeholder="e.g. admin" autocomplete="username" />
+              </div>
+              <div class="form-group">
+                <label class="form-label">New Password</label>
+                <input class="form-input" type="password" id="s-auth-pass" placeholder="Enter new password" autocomplete="new-password" />
+              </div>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Confirm Password</label>
+              <input class="form-input" type="password" id="s-auth-pass2" placeholder="Confirm new password" autocomplete="new-password" style="max-width:320px;" />
+            </div>
+            <div class="form-hint" style="margin-bottom:16px;">
+              Password is stored as a SHA-256 hash in config.yml — never in plaintext.
+              You can also set <code style="color:var(--accent2);">EMPTYARR_USERNAME</code> /
+              <code style="color:var(--accent2);">EMPTYARR_PASSWORD</code> env vars instead.
+            </div>
+            <div style="display:flex;gap:8px;align-items:center;">
+              <button class="btn btn-primary" onclick="saveAuth()">Set Credentials</button>
+              <button class="btn btn-danger btn-sm" onclick="clearAuth()">Remove Auth</button>
+              <span id="auth-save-result" style="font-size:12px;margin-left:4px;"></span>
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-header"><span class="card-title">Session</span></div>
+          <div class="card-body">
+            <div style="font-size:12px;color:var(--text2);margin-bottom:12px;line-height:1.6;">
+              Setting credentials takes effect immediately — no container restart needed.
+              Existing sessions remain active until the browser is closed or you sign out.
+            </div>
+            {% if auth_enabled %}
+            <a href="/logout" class="btn btn-secondary btn-sm">Sign out of this session</a>
+            {% else %}
+            <div style="font-size:12px;color:var(--muted);">No active auth — anyone on the network can access this UI.</div>
+            {% endif %}
+          </div>
+        </div>
       </div>
 
       <!-- About -->
@@ -915,6 +971,9 @@ async function loadSettings() {
     document.getElementById('s-notify-success').checked = _settingsData.notify_success;
     document.getElementById('s-notify-failure').checked = _settingsData.notify_failure;
     document.getElementById('s-notify-skip').checked    = _settingsData.notify_skip;
+    // Pre-populate username if set
+    const authUser = document.getElementById('s-auth-user');
+    if (authUser && cfg.auth && cfg.auth.username) authUser.value = cfg.auth.username;
   } catch(e) { toast('Error loading settings', 'fail'); }
 }
 
@@ -1501,6 +1560,58 @@ function startPolling(btn){
   },2000);
 }
 
+// ── Auth settings ─────────────────────────────────────────────────────────────
+async function saveAuth() {
+  const user  = document.getElementById('s-auth-user').value.trim();
+  const pass  = document.getElementById('s-auth-pass').value;
+  const pass2 = document.getElementById('s-auth-pass2').value;
+  const result = document.getElementById('auth-save-result');
+  if (!user)          { result.innerHTML='<span style="color:var(--fail2);">Username required</span>'; return; }
+  if (!pass)          { result.innerHTML='<span style="color:var(--fail2);">Password required</span>'; return; }
+  if (pass !== pass2) { result.innerHTML='<span style="color:var(--fail2);">Passwords do not match</span>'; return; }
+  try {
+    const r = await fetch('/api/auth/save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:user,password:pass})});
+    const d = await r.json();
+    if (d.ok) {
+      result.innerHTML=`<span style="color:var(--pass);">✓ ${d.message}</span>`;
+      document.getElementById('s-auth-pass').value='';
+      document.getElementById('s-auth-pass2').value='';
+      updateAuthBanner(true, user);
+      toast('Auth credentials saved','pass');
+    } else { result.innerHTML=`<span style="color:var(--fail2);">✗ ${d.error}</span>`; }
+  } catch(e) { result.innerHTML='<span style="color:var(--fail2);">Save failed</span>'; }
+}
+
+async function clearAuth() {
+  if (!confirm('Remove authentication? Anyone on the network will be able to access the UI.')) return;
+  const result = document.getElementById('auth-save-result');
+  try {
+    const r = await fetch('/api/auth/save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({clear:true})});
+    const d = await r.json();
+    if (d.ok) {
+      result.innerHTML=`<span style="color:var(--warn2);">✓ ${d.message}</span>`;
+      document.getElementById('s-auth-user').value='';
+      updateAuthBanner(false,'');
+      toast('Auth removed','warn');
+    } else { result.innerHTML=`<span style="color:var(--fail2);">✗ ${d.error}</span>`; }
+  } catch(e) { result.innerHTML='<span style="color:var(--fail2);">Failed</span>'; }
+}
+
+function updateAuthBanner(enabled, username) {
+  const el = document.getElementById('auth-status-banner');
+  if (!el) return;
+  if (enabled) {
+    el.innerHTML=`<div style="background:rgba(16,185,129,.08);border:1px solid rgba(16,185,129,.2);border-radius:7px;padding:10px 14px;font-size:12px;color:var(--pass);">🔒 Auth enabled — signed in as <strong>${username}</strong></div>`;
+  } else {
+    el.innerHTML=`<div style="background:rgba(245,158,11,.08);border:1px solid rgba(245,158,11,.2);border-radius:7px;padding:10px 14px;font-size:12px;color:var(--warn2);">⚠️ Auth disabled — UI is open to anyone on the network</div>`;
+  }
+}
+
+function initAuthBanner() {
+  const authEnabled = {{ 'true' if auth_enabled else 'false' }};
+  updateAuthBanner(authEnabled, '{{ config.auth_username if config else "" }}');
+}
+
 // ── Fetch ─────────────────────────────────────────────────────────────────────
 async function fetchStatus() {
   try {
@@ -1519,6 +1630,7 @@ if (!_configMissing) {
   setInterval(fetchStatus, 15000);
   setInterval(fetchHistory, 30000);
   fetchStatus();
+  initAuthBanner();
 }
 </script>
 </body>

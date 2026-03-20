@@ -10,7 +10,7 @@ from apscheduler.triggers.cron import CronTrigger
 
 from src.config import load_config, AppConfig, PlexInstanceConfig, LibraryConfig
 from src.plex_client import PlexClient
-from src.auth import require_auth, auth_enabled, check_credentials, is_authenticated
+from src.auth import require_auth, auth_enabled, check_credentials, is_authenticated, hash_password
 from src import runner
 from src.runner import get_scheduling_enabled, set_scheduling_enabled
 
@@ -118,7 +118,7 @@ def _build_ui_instances():
 
 @app.route("/login", methods=["GET", "POST"])
 def login():
-    if not auth_enabled():
+    if not auth_enabled(config):
         return redirect(url_for("index"))
     if is_authenticated():
         return redirect(url_for("index"))
@@ -126,7 +126,7 @@ def login():
     if request.method == "POST":
         username = request.form.get("username", "")
         password = request.form.get("password", "")
-        if check_credentials(username, password):
+        if check_credentials(username, password, config):
             session["authenticated"] = True
             return redirect(url_for("index"))
         error = "Invalid username or password"
@@ -145,7 +145,8 @@ def index():
     return render_template("index.html",
         instances=_build_ui_instances(),
         config_missing=config.config_missing,
-        auth_enabled=auth_enabled(),
+        auth_enabled=auth_enabled(config),
+        config=config,
     )
 
 
@@ -315,6 +316,15 @@ def api_wizard_save():
         "plex_instances": []
     }
 
+    # Write auth block if provided
+    wiz_user = data.get("auth_username", "").strip()
+    wiz_pass = data.get("auth_password", "").strip()
+    if wiz_user and wiz_pass:
+        cfg["auth"] = {
+            "username":      wiz_user,
+            "password_hash": hash_password(wiz_pass),
+        }
+
     env_vars_needed = []  # list of {name, description} for the summary screen
 
     for inst in data.get("instances", []):
@@ -399,6 +409,44 @@ def api_config_load():
             import yaml as _yaml
             raw = _yaml.safe_load(f) or {}
         return jsonify({"ok": True, "config": raw})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.route("/api/auth/save", methods=["POST"])
+@require_auth
+def api_auth_save():
+    """Save or clear username/password in config.yml."""
+    global config
+    data     = request.get_json(silent=True) or {}
+    username = data.get("username", "").strip()
+    password = data.get("password", "").strip()
+    clear    = data.get("clear", False)
+
+    try:
+        with open(CONFIG_PATH, "r") as f:
+            raw = yaml.safe_load(f) or {}
+
+        if clear or (not username and not password):
+            raw.pop("auth", None)
+        else:
+            if not username:
+                return jsonify({"ok": False, "error": "Username required"}), 400
+            if not password:
+                return jsonify({"ok": False, "error": "Password required"}), 400
+            raw["auth"] = {
+                "username":      username,
+                "password_hash": hash_password(password),
+            }
+
+        with open(CONFIG_PATH, "w") as f:
+            yaml.dump(raw, f, default_flow_style=False, allow_unicode=True, sort_keys=False)
+
+        # Hot-reload config so auth takes effect without restart
+        config = load_config(CONFIG_PATH)
+
+        action = "cleared" if (clear or not username) else f"set for '{username}'"
+        return jsonify({"ok": True, "message": f"Auth {action} — takes effect immediately."})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
 
