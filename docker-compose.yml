@@ -4,7 +4,7 @@ services:
     container_name: emptyarr
     restart: unless-stopped
     ports:
-      - "7878:7878"
+      - "8222:8222"
     volumes:
       # ── Config file ─────────────────────────────────────────────────────────
       # IMPORTANT: Create this file BEFORE starting the container.

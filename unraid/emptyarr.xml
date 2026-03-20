@@ -18,20 +18,20 @@
     Set your Plex tokens and API keys as environment variables below.
   </Overview>
   <Category>MediaApp:Video Tools:</Category>
-  <WebUI>http://[IP]:[PORT:7878]/</WebUI>
+  <WebUI>http://[IP]:[PORT:8222]/</WebUI>
   <TemplateURL>https://raw.githubusercontent.com/jjbobzin/emptyarr/main/unraid/emptyarr.xml</TemplateURL>
   <ExtraParams>--restart unless-stopped</ExtraParams>
 
   <!-- ── Web UI port ─────────────────────────────────────────────────────── -->
   <Config Name="Web UI Port"
-          Target="7878"
-          Default="7878"
+          Target="8222"
+          Default="8222"
           Mode="tcp"
           Description="Port for the emptyarr web interface."
           Type="Port"
           Display="always"
           Required="true"
-          Mask="false">7878</Config>
+          Mask="false">8222</Config>
 
   <!-- ── Config file ────────────────────────────────────────────────────── -->
   <Config Name="Config File Path"

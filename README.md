@@ -122,7 +122,7 @@ where you created the file in Step 1.
 Unraid → Docker → Add Container:
 - Repository: `ghcr.io/jjbobzin/emptyarr:latest`
 - Name: `emptyarr`
-- Port: `7878` → `7878`
+- Port: `8222` → `8222`
 
 Add path mappings:
 
@@ -152,7 +152,7 @@ docker compose up -d --build
 
 ### Step 5 — First run
 
-Open `http://YOUR_UNRAID_IP:7878`
+Open `http://YOUR_UNRAID_IP:8222`
 
 1. Click **check** — pings Plex on all instances, no library action
 2. Click **◎ dry run** — runs all checks, shows what would be removed, no action
