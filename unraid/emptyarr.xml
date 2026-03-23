@@ -1,13 +1,13 @@
 <?xml version="1.0"?>
 <Container version="2">
   <n>emptyarr</n>
-  <Repository>ghcr.io/jjbobzin/emptyarr:latest</Repository>
-  <Registry>https://github.com/jjbobzin/emptyarr/pkgs/container/emptyarr</Registry>
+  <Repository>ghcr.io/jjbobz/emptyarr:latest</Repository>
+  <Registry>https://github.com/jjbobz/emptyarr/pkgs/container/emptyarr</Registry>
   <Network>bridge</Network>
   <Shell>sh</Shell>
   <Privileged>false</Privileged>
-  <Support>https://github.com/jjbobzin/emptyarr/issues</Support>
-  <Project>https://github.com/jjbobzin/emptyarr</Project>
+  <Support>https://github.com/jjbobz/emptyarr/issues</Support>
+  <Project>https://github.com/jjbobz/emptyarr</Project>
   <Overview>
     Safely empties Plex library trash by validating mount health before acting.
     Supports multiple Plex instances, mixed physical/debrid libraries,
@@ -18,9 +18,9 @@
     Set your Plex tokens and API keys as environment variables below.
   </Overview>
   <Category>MediaApp:Video Tools:</Category>
-  <Icon>https://raw.githubusercontent.com/jjbobzin/emptyarr/main/static/icon.png</Icon>
+  <Icon>https://raw.githubusercontent.com/jjbobz/emptyarr/main/static/icon.png</Icon>
   <WebUI>http://[IP]:[PORT:8222]/</WebUI>
-  <TemplateURL>https://raw.githubusercontent.com/jjbobzin/emptyarr/main/unraid/emptyarr.xml</TemplateURL>
+  <TemplateURL>https://raw.githubusercontent.com/jjbobz/emptyarr/main/unraid/emptyarr.xml</TemplateURL>
   <ExtraParams>--restart unless-stopped</ExtraParams>
 
   <!-- ── Web UI port ─────────────────────────────────────────────────────── -->
