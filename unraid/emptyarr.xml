@@ -1,8 +1,8 @@
 <?xml version="1.0"?>
 <Container version="2">
   <n>emptyarr</n>
-  <Repository>ghcr.io/jjbobz/emptyarr:latest</Repository>
-  <Registry>https://github.com/jjbobz/emptyarr/pkgs/container/emptyarr</Registry>
+  <Repository>jjbobz/emptyarr:latest</Repository>
+  <Registry>https://hub.docker.com/r/jjbobz/emptyarr</Registry>
   <Network>bridge</Network>
   <Shell>sh</Shell>
   <Privileged>false</Privileged>

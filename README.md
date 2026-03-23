@@ -51,7 +51,7 @@ docker build -t emptyarr:latest .
 |---|---|
 | `PUID` | `99` (Unraid nobody) |
 | `PGID` | `100` (Unraid users) |
-| `TZ` | Your timezone, e.g. `America/Denver` |
+| `TZ` | Your timezone, e.g. `America/New_York` |
 | `PLEX_TOKEN_<NAME>` | Optional — set per instance, or paste in the UI instead |
 
 Token env var names match your instance name uppercased with spaces/hyphens as underscores: `PLEX_TOKEN_STREAMSTEAD`, `PLEX_TOKEN_STREAMSTEAD_UNLIMITED`, etc.
@@ -95,7 +95,7 @@ notify:
   on_skip: false
 
 plex_instances:
-  - name: Streamstead
+  - name: My Plex
     url: http://192.168.1.100:32400
     token: ''
     libraries:
@@ -103,18 +103,18 @@ plex_instances:
         type: physical
         cron: "0 * * * *"
         paths:
-          - path: /mnt/user/media/usenet/movies
+          - path: /mnt/user/media/movies
             type: physical
             min_threshold: 90
       - name: TV Shows
         type: physical
         cron: "0 * * * *"
         paths:
-          - path: /mnt/user/media/usenet/tv
+          - path: /mnt/user/media/tv
             type: physical
             min_threshold: 90
 
-  - name: Streamstead-Unlimited
+  - name: My Plex Unlimited
     url: http://192.168.1.100:32410
     token: ''
     libraries:
@@ -122,7 +122,7 @@ plex_instances:
         type: mixed
         cron: "0 * * * *"
         paths:
-          - path: /mnt/user/media/usenet/movies
+          - path: /mnt/user/media/movies
             type: physical
             min_threshold: 90
           - path: /symlink_media/symlinks/radarr

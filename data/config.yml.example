@@ -1,118 +1,89 @@
-# emptyarr config
-# ─────────────────────────────────────────────────────────────────────────────
-# Copy this file to config.yml and fill in your values.
-# IMPORTANT: config.yml must exist before starting the container.
-#
-# Secrets (tokens, API keys) are best set as environment variables so they
-# don't live in this file. See .env.example or the Unraid Docker UI.
-# Environment variables always override values set here.
-# ─────────────────────────────────────────────────────────────────────────────
+# emptyarr configuration example
+# Copy this to config.yml and edit to match your setup.
+# The setup wizard at http://YOUR_IP:8222 can generate this for you.
 
-discord_webhook: ""   # or set DISCORD_WEBHOOK env var
+discord_webhook: https://discord.com/api/webhooks/YOUR_WEBHOOK_ID/YOUR_WEBHOOK_TOKEN
 
 notify:
-  on_success: false   # notify when trash is successfully emptied
-  on_failure: true    # notify when health checks fail and empty is skipped
-  on_skip:    true    # notify when something prevents the run (config error etc)
+  on_emptied: true       # notify when trash was actually emptied
+  on_health_fail: true   # notify when health checks failed and empty was skipped
+  on_error: true         # notify when emptyTrash API call failed
+  on_clean: false        # notify when run succeeded but trash was already empty (noisy)
+  on_skip: false         # notify when run was skipped (scheduling paused, config error)
+
+# Optional: set username/password to protect the web UI
+# Leave out to disable auth (fine for trusted local networks)
+# Or configure via Settings → Security in the UI
+auth:
+  username: admin
+  password_hash: ""  # set via Settings UI — never enter plaintext here
+
+# Optional: debrid provider API keys for health checks
+# Can also be set as env vars: RD_API_KEY, AD_API_KEY, TB_API_KEY, DL_API_KEY
+# Or configure via Settings → Providers in the UI
+# providers:
+#   realdebrid:
+#     api_key: YOUR_RD_API_KEY
 
 plex_instances:
-
-  # ── Example: physical-only Plex instance ────────────────────────────────────
-  - name: "My Plex"                    # used to name env vars: PLEX_TOKEN_MY_PLEX
-    url:   "http://192.168.1.100:32400"
-    token: ""                          # leave blank — set PLEX_TOKEN_MY_PLEX env var
-
+  # Physical media server example
+  - name: My Plex
+    url: http://192.168.1.100:32400
+    token: ""  # set via PLEX_TOKEN_STREAMSTEAD env var, or paste in Settings UI
     libraries:
-      - name: Movies                   # must match Plex library name exactly
+      - name: Movies
         type: physical
-        cron: "0 * * * *"             # every hour
+        cron: "0 * * * *"   # every hour — standard cron syntax
         paths:
-          - path: /media/physical/movies
+          - path: /mnt/user/media/movies
             type: physical
-            min_files: 200            # abort if fewer than this many files on disk
-            min_threshold: 95         # abort if disk files < 95% of Plex count
+            min_threshold: 90  # 90% of Plex count must exist on disk
 
       - name: TV Shows
         type: physical
         cron: "0 * * * *"
         paths:
-          - path: /media/physical/tv
+          - path: /mnt/user/media/tv
             type: physical
-            min_files: 500
-            min_threshold: 95
+            min_threshold: 90
 
-  # ── Example: mixed physical + debrid Plex instance ──────────────────────────
-  - name: "My Plex Unlimited"          # PLEX_TOKEN_MY_PLEX_UNLIMITED
-    url:   "http://192.168.1.100:32410"
-    token: ""
+      - name: Sports
+        type: physical
+        cron: "0 * * * *"
+        paths:
+          - path: /mnt/user/media/sports
+            type: physical
+            min_threshold: 50  # lower threshold for small/growing libraries
 
+  # Debrid media server example
+  - name: My Plex Unlimited
+    url: http://192.168.1.100:32410
+    token: ""  # set via PLEX_TOKEN_STREAMSTEAD_UNLIMITED env var
     libraries:
+      # Mixed library — physical usenet + debrid symlinks in same Plex library
+      # threshold check combines all paths vs total Plex count
       - name: Movies
         type: mixed
-        cron: "*/30 * * * *"          # every 30 minutes
+        cron: "*/30 * * * *"  # every 30 minutes
         paths:
-          - path: /media/symlinks/movie
+          - path: /mnt/user/media/movies
+            type: physical
+            min_threshold: 90
+          - path: /symlink_media/symlinks/radarr
             type: debrid
-            min_files: 200
             min_threshold: 90
             provider_checks:
               - type: realdebrid
-                api_key: ""           # leave blank to use RD_API_KEY env var
+                api_key: ""  # uses RD_API_KEY env var or providers block above
 
-          - path: /media/physical/movies
-            type: physical
-            min_files: 100
-            min_threshold: 95
-
+      # Pure debrid library
       - name: TV Shows
-        type: mixed
+        type: debrid
         cron: "*/30 * * * *"
         paths:
-          - path: /media/symlinks/tv
+          - path: /symlink_media/symlinks/sonarr
             type: debrid
-            min_files: 500
             min_threshold: 90
             provider_checks:
               - type: realdebrid
                 api_key: ""
-
-          - path: /media/physical/tv
-            type: physical
-            min_files: 200
-            min_threshold: 95
-
-# ── Reference ─────────────────────────────────────────────────────────────────
-#
-# Library types:
-#   physical  real files on disk — mountpoint + file threshold checks only
-#   debrid    symlinks to rclone/debrid mount — adds symlink resolution check
-#   usenet    symlinks to usenet mount — same checks as debrid (future)
-#   mixed     per-path type declarations for libraries with both physical + debrid
-#
-# provider_checks (optional, per debrid/usenet path):
-#   Supported types: realdebrid | alldebrid | torbox | debridlink
-#   api_key: leave blank to pick up from env var (RD_API_KEY / AD_API_KEY etc)
-#   Omit entirely to skip the provider API check — symlink resolution is the real gate
-#
-# Multiple providers on one path:
-#   provider_checks:
-#     - type: realdebrid
-#       api_key: ""
-#     - type: alldebrid
-#       api_key: ""
-#
-# Plex token env var naming:
-#   Instance name → uppercased, spaces/hyphens → underscores → prefix PLEX_TOKEN_
-#   "My Plex"              → PLEX_TOKEN_MY_PLEX
-#   "Plex-4K"              → PLEX_TOKEN_PLEX_4K
-#   "HomeServer"           → PLEX_TOKEN_HOMESERVER
-#
-# Cron reference:
-#   "*/30 * * * *"   every 30 min
-#   "0 * * * *"      every hour
-#   "0 */2 * * *"    every 2 hours
-#   "0 2 * * *"      daily at 2am
-#
-# min_files / min_threshold:
-#   min_files     absolute floor — set to ~10% of your library file count
-#   min_threshold ratio check — 90 = disk files must be >= 90% of Plex count
