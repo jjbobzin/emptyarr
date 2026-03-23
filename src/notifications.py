@@ -5,6 +5,10 @@ from typing import List, Dict
 def _post(webhook_url: str, payload: dict):
     if not webhook_url:
         return
+    # Validate it's actually a Discord webhook URL to prevent SSRF
+    if not webhook_url.startswith("https://discord.com/api/webhooks/") and \
+       not webhook_url.startswith("https://discordapp.com/api/webhooks/"):
+        return
     try:
         requests.post(webhook_url, json=payload, timeout=10)
     except Exception:

@@ -4,7 +4,7 @@ import os
 import secrets
 import threading
 import requests as _requests
-import xml.etree.ElementTree as ET
+import defusedxml.ElementTree as ET
 import yaml
 from flask import Flask, jsonify, render_template, request, redirect, url_for, session
 
