@@ -900,7 +900,7 @@ hr.divider{border:none;border-top:1px solid var(--border);margin:16px 0;}
     <div class="overlay-body" id="wiz-body"></div>
     <div class="overlay-footer" id="wiz-footer">
       <button class="btn btn-secondary" id="wiz-back" onclick="wizBack()">← back</button>
-      <button class="btn btn-primary" id="wiz-next" onclick="wizNext()">next →</button>
+      <button class="btn btn-primary" id="wiz-next">next →</button>
     </div>
   </div>
 </div>
@@ -1396,29 +1396,38 @@ async function showBrowser(path) {
     if (!d.ok) { toast(d.error, 'fail'); return; }
     let modal = document.getElementById('_browser');
     if (!modal) { modal = document.createElement('div'); modal.id = '_browser'; modal.className = 'browser-modal'; document.body.appendChild(modal); }
+    // Use h() for all server-supplied values; use data-* for paths to avoid onclick injection
+    const entriesHtml = d.entries.length
+      ? d.entries.map(e => `
+          <div class="browser-entry" data-path="${h(e.path)}">
+            <span class="browser-entry-icon">📁</span>
+            <span class="browser-entry-name">${h(e.name)}</span>
+            ${e.is_link ? '<span class="browser-entry-link">symlink</span>' : ''}
+          </div>`).join('')
+      : '<div style="padding:16px;color:var(--muted);font-size:12px;">Empty directory</div>';
     modal.innerHTML = `
       <div class="browser-inner">
         <div class="browser-header">
           <span style="font-size:13px;font-weight:600;color:var(--bright);">Browse Filesystem</span>
-          <button class="btn btn-secondary btn-sm" onclick="document.getElementById('_browser').remove()">✕</button>
+          <button class="btn btn-secondary btn-sm" id="_browser-close">✕</button>
         </div>
         <div class="browser-path-bar">
-          ${d.parent !== null ? `<span style="cursor:pointer;color:var(--info2);" onclick="showBrowser('${d.parent}')">← up</span>` : ''}
-          <span>${d.path}</span>
+          ${d.parent !== null ? `<span style="cursor:pointer;color:var(--info2);" id="_browser-up">← up</span>` : ''}
+          <span>${h(d.path)}</span>
         </div>
-        <div class="browser-list">
-          ${d.entries.map(e => `
-            <div class="browser-entry" onclick="showBrowser('${e.path}')">
-              <span class="browser-entry-icon">📁</span>
-              <span class="browser-entry-name">${e.name}</span>
-              ${e.is_link ? '<span class="browser-entry-link">symlink</span>' : ''}
-            </div>`).join('') || '<div style="padding:16px;color:var(--muted);font-size:12px;">Empty directory</div>'}
-        </div>
+        <div class="browser-list" id="_browser-list">${entriesHtml}</div>
         <div class="browser-footer">
-          <span class="browser-current">${d.path}</span>
-          <button class="btn btn-success btn-sm" onclick="selectPath('${d.path}')">Use this path</button>
+          <span class="browser-current">${h(d.path)}</span>
+          <button class="btn btn-success btn-sm" id="_browser-select">Use this path</button>
         </div>
       </div>`;
+    // Wire up handlers after render — avoids onclick string interpolation with path values
+    modal.querySelector('#_browser-close').onclick = () => modal.remove();
+    modal.querySelector('#_browser-select').onclick = () => selectPath(d.path);
+    if (d.parent !== null) modal.querySelector('#_browser-up').onclick = () => showBrowser(d.parent);
+    modal.querySelectorAll('.browser-entry[data-path]').forEach(el => {
+      el.onclick = () => showBrowser(el.dataset.path);
+    });
   } catch(e) { toast('Browse failed', 'fail'); }
 }
 function selectPath(path) {
@@ -1497,7 +1506,6 @@ function renderWizStep() {
   else if (_wizStep === 3) renderWiz3(body, next);
 }
 function wizBack() { if (_wizStep > 1) { _wizStep--; renderWizStep(); } }
-function wizNext() {}
 
 function renderWiz1(body, next) {
   document.getElementById('wiz-title').textContent = 'Step 1 — Plex Instances';
@@ -1696,8 +1704,8 @@ async function wizSave3() {
         envSection=`<div style="margin-top:10px;padding-top:10px;border-top:1px solid rgba(16,185,129,.2);">
           <div style="font-size:11px;color:var(--pass);font-weight:600;margin-bottom:6px;">Set in Docker UI:</div>
           ${d.env_vars_needed.map(ev=>`<div style="display:flex;gap:8px;margin-bottom:4px;align-items:center;">
-            <code style="background:var(--bg);padding:2px 8px;border-radius:3px;font-family:var(--mono);font-size:11px;color:var(--accent2);">${ev.name}</code>
-            <span style="font-size:11px;color:var(--muted);">${ev.description}</span></div>`).join('')}
+            <code style="background:var(--bg);padding:2px 8px;border-radius:3px;font-family:var(--mono);font-size:11px;color:var(--accent2);">${h(ev.name)}</code>
+            <span style="font-size:11px;color:var(--muted);">${h(ev.description)}</span></div>`).join('')}
         </div>`;
       }
       result.innerHTML=`<div style="background:rgba(16,185,129,.08);border:1px solid rgba(16,185,129,.25);border-radius:7px;padding:14px;color:var(--pass);font-size:12px;line-height:1.7;">

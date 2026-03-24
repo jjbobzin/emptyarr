@@ -3,6 +3,7 @@ import logging.handlers
 import os
 import secrets
 import threading
+import urllib.parse
 import yaml
 from flask import Flask, jsonify, render_template, request, redirect, url_for, session
 
@@ -55,7 +56,14 @@ plex_clients: dict[str, PlexClient] = {
 }
 
 app            = Flask(__name__)
-app.secret_key = os.environ.get("EMPTYARR_SECRET_KEY", secrets.token_hex(32))
+_secret_key_env = os.environ.get("EMPTYARR_SECRET_KEY", "")
+if not _secret_key_env:
+    logger.warning(
+        "EMPTYARR_SECRET_KEY is not set — a random session key will be generated on every "
+        "restart, which logs out all users. Set this env var to a stable random value "
+        "(e.g. `openssl rand -hex 32`) to persist sessions across restarts."
+    )
+app.secret_key = _secret_key_env or secrets.token_hex(32)
 scheduler      = BackgroundScheduler()
 _next_runs: dict = {}
 
@@ -275,6 +283,26 @@ def api_dryrun_all():
 
 # ── Wizard / Config endpoints ─────────────────────────────────────────────────
 
+def _is_valid_plex_url(url: str) -> tuple[bool, str]:
+    """
+    Return (ok, reason). Accepts http(s) URLs pointing at a Plex server.
+    Rejects non-http schemes and known cloud metadata endpoints.
+    Port is intentionally unrestricted — Plex supports custom ports.
+    """
+    try:
+        parsed = urllib.parse.urlparse(url)
+    except Exception:
+        return False, "Invalid URL"
+    if parsed.scheme not in ("http", "https"):
+        return False, "URL must use http or https"
+    # Block cloud metadata endpoints (AWS/GCP/Azure instance identity)
+    host = parsed.hostname or ""
+    _metadata_hosts = {"169.254.169.254", "metadata.google.internal", "fd00:ec2::254"}
+    if host in _metadata_hosts:
+        return False, "URL targets a cloud metadata address"
+    return True, ""
+
+
 @app.route("/api/wizard/test-plex", methods=["POST"])
 @require_auth
 def api_test_plex():
@@ -284,6 +312,9 @@ def api_test_plex():
     token = data.get("token", "")
     if not url or not token:
         return jsonify({"ok": False, "error": "URL and token are required"}), 400
+    ok, reason = _is_valid_plex_url(url)
+    if not ok:
+        return jsonify({"ok": False, "error": reason}), 400
     try:
         plex = PlexClient(url, token)
         reachable = plex.check_reachable()
@@ -298,10 +329,25 @@ def api_test_plex():
 @app.route("/api/wizard/browse", methods=["POST"])
 @require_auth
 def api_browse():
-    """Browse filesystem directories for path selection."""
+    """Browse filesystem directories for path selection.
+
+    Restricted to BROWSE_ROOTS (comma-separated env var, default /mnt,/media,/data,/home).
+    Requests for paths outside these roots are rejected.
+    """
+    _browse_roots_raw = os.environ.get("BROWSE_ROOTS", "/mnt,/media,/data,/home")
+    _browse_roots = [r.strip() for r in _browse_roots_raw.split(",") if r.strip()]
+
     data = request.get_json(silent=True) or {}
-    path = data.get("path", "/")
+    raw_path = data.get("path", _browse_roots[0] if _browse_roots else "/")
     try:
+        # Resolve symlinks and normalise to prevent traversal tricks (e.g. ../../etc)
+        path = os.path.realpath(os.path.normpath(raw_path))
+
+        # Enforce root whitelist
+        if not any(path == root or path.startswith(root.rstrip("/") + "/")
+                   for root in _browse_roots):
+            return jsonify({"ok": False, "error": "Path is outside allowed browse roots"}), 403
+
         if not os.path.exists(path):
             return jsonify({"ok": False, "error": f"Path does not exist: {path}"}), 400
         entries = []
@@ -312,7 +358,12 @@ def api_browse():
                     "path":    entry.path,
                     "is_link": entry.is_symlink(),
                 })
-        parent = str(os.path.dirname(path)) if path != "/" else None
+        # Compute parent, but only if it is still within an allowed root
+        raw_parent = os.path.dirname(path)
+        parent = raw_parent if (raw_parent != path and any(
+            raw_parent == root or raw_parent.startswith(root.rstrip("/") + "/")
+            for root in _browse_roots
+        )) else None
         return jsonify({"ok": True, "path": path, "parent": parent, "entries": entries})
     except PermissionError:
         return jsonify({"ok": False, "error": f"Permission denied: {path}"}), 403
