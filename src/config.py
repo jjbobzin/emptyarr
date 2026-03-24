@@ -67,7 +67,7 @@ class AppConfig:
     log_level: str = "INFO"
     config_missing: bool = False    # True when no config.yml — UI shows setup prompt
     auth_username: str = ""
-    auth_password_hash: str = ""    # SHA-256 hash, set via Settings UI
+    auth_password_hash: str = ""    # bcrypt (or legacy SHA-256) hash, set via Settings UI
     providers: dict = field(default_factory=dict)  # {realdebrid: {api_key: ...}, ...}
 
 

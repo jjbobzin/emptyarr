@@ -3,8 +3,6 @@ import logging.handlers
 import os
 import secrets
 import threading
-import requests as _requests
-import defusedxml.ElementTree as ET
 import yaml
 from flask import Flask, jsonify, render_template, request, redirect, url_for, session
 
@@ -451,8 +449,7 @@ def api_config_load():
     """Return current config.yml contents for the settings editor."""
     try:
         with open(CONFIG_PATH, "r") as f:
-            import yaml as _yaml
-            raw = _yaml.safe_load(f) or {}
+            raw = yaml.safe_load(f) or {}
         return jsonify({"ok": True, "config": raw})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
