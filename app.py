@@ -371,6 +371,69 @@ def api_browse():
         return jsonify({"ok": False, "error": str(e)}), 500
 
 
+_PROVIDER_ENV_MAP = {
+    "realdebrid": "RD_API_KEY",
+    "alldebrid":  "AD_API_KEY",
+    "torbox":     "TB_API_KEY",
+    "debridlink": "DL_API_KEY",
+}
+
+
+def _build_path_cfg(p: dict, env_vars_needed: list) -> dict:
+    path_cfg = {
+        "path":          p.get("path", ""),
+        "type":          p.get("type", "physical"),
+        "min_threshold": int(p.get("min_threshold", 90)),
+    }
+    pcs = p.get("provider_checks", [])
+    if not pcs:
+        return path_cfg
+    path_cfg["provider_checks"] = [
+        {"type": pc.get("type", ""), "api_key": ""}
+        for pc in pcs
+    ]
+    for pc in pcs:
+        ptype    = pc.get("type", "")
+        env_name = _PROVIDER_ENV_MAP.get(ptype)
+        if env_name and not any(e["name"] == env_name for e in env_vars_needed):
+            env_vars_needed.append({
+                "name":        env_name,
+                "description": f"{ptype.capitalize()} API key (optional — for provider health checks)",
+                "value":       "",
+            })
+    return path_cfg
+
+
+def _build_library_cfg(lib: dict, env_vars_needed: list) -> dict:
+    lib_cfg = {
+        "name":  lib.get("name", ""),
+        "type":  lib.get("type", "physical"),
+        "cron":  lib.get("cron", "0 * * * *"),
+        "paths": [_build_path_cfg(p, env_vars_needed) for p in lib.get("paths", [])],
+    }
+    return lib_cfg
+
+
+def _build_instance_cfg(inst: dict, store_tokens: bool, env_vars_needed: list) -> dict:
+    inst_name = inst.get("name", "")
+    token     = inst.get("token", "")
+    safe_name = inst_name.upper().replace(" ", "_").replace("-", "_")
+
+    if not store_tokens:
+        env_vars_needed.append({
+            "name":        f"PLEX_TOKEN_{safe_name}",
+            "description": f"Plex token for '{inst_name}'",
+            "value":       token,
+        })
+
+    return {
+        "name":      inst_name,
+        "url":       inst.get("url", ""),
+        "token":     token if store_tokens else "",
+        "libraries": [_build_library_cfg(lib, env_vars_needed) for lib in inst.get("libraries", [])],
+    }
+
+
 @app.route("/api/wizard/save", methods=["POST"])
 @require_auth
 def api_wizard_save():
@@ -391,7 +454,6 @@ def api_wizard_save():
     except Exception:
         existing = {}
 
-    # Build config dict from wizard data
     cfg = {
         "discord_webhook": data.get("discord_webhook", ""),
         "notify": {
@@ -408,77 +470,18 @@ def api_wizard_save():
     wiz_user = data.get("auth_username", "").strip()
     wiz_pass = data.get("auth_password", "").strip()
     if wiz_user and wiz_pass:
-        cfg["auth"] = {
-            "username":      wiz_user,
-            "password_hash": hash_password(wiz_pass),
-        }
+        cfg["auth"] = {"username": wiz_user, "password_hash": hash_password(wiz_pass)}
     elif "auth" in existing:
-        cfg["auth"] = existing["auth"]  # preserve existing auth
+        cfg["auth"] = existing["auth"]
 
-    # Preserve existing providers block
     if "providers" in existing:
         cfg["providers"] = existing["providers"]
 
-    env_vars_needed = []  # list of {name, description} for the summary screen
-
-    for inst in data.get("instances", []):
-        inst_name = inst.get("name", "")
-        token     = inst.get("token", "")
-        safe_name = inst_name.upper().replace(" ", "_").replace("-", "_")
-        env_var   = f"PLEX_TOKEN_{safe_name}"
-
-        instance_cfg = {
-            "name":      inst_name,
-            "url":       inst.get("url", ""),
-            "token":     token if store_tokens else "",
-            "libraries": []
-        }
-
-        if not store_tokens:
-            env_vars_needed.append({
-                "name":        env_var,
-                "description": f"Plex token for '{inst_name}'",
-                "value":       token,  # send back so UI can show it pre-filled
-            })
-
-        for lib in inst.get("libraries", []):
-            lib_cfg = {
-                "name": lib.get("name", ""),
-                "type": lib.get("type", "physical"),
-                "cron": lib.get("cron", "0 * * * *"),
-                "paths": []
-            }
-            for p in lib.get("paths", []):
-                path_cfg = {
-                    "path":          p.get("path", ""),
-                    "type":          p.get("type", "physical"),
-                    "min_threshold": int(p.get("min_threshold", 90)),
-                }
-                pcs = p.get("provider_checks", [])
-                if pcs:
-                    path_cfg["provider_checks"] = [
-                        {"type": pc.get("type", ""), "api_key": ""}
-                        for pc in pcs
-                    ]
-                    # Add env var hints for provider API keys
-                    for pc in pcs:
-                        ptype    = pc.get("type", "")
-                        env_map  = {
-                            "realdebrid": "RD_API_KEY",
-                            "alldebrid":  "AD_API_KEY",
-                            "torbox":     "TB_API_KEY",
-                            "debridlink": "DL_API_KEY",
-                        }
-                        env_name = env_map.get(ptype)
-                        if env_name and not any(e["name"] == env_name for e in env_vars_needed):
-                            env_vars_needed.append({
-                                "name":        env_name,
-                                "description": f"{ptype.capitalize()} API key (optional — for provider health checks)",
-                                "value":       "",
-                            })
-                lib_cfg["paths"].append(path_cfg)
-            instance_cfg["libraries"].append(lib_cfg)
-        cfg["plex_instances"].append(instance_cfg)
+    env_vars_needed: list = []
+    cfg["plex_instances"] = [
+        _build_instance_cfg(inst, store_tokens, env_vars_needed)
+        for inst in data.get("instances", [])
+    ]
 
     try:
         os.makedirs(os.path.dirname(CONFIG_PATH), exist_ok=True)

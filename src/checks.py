@@ -3,6 +3,17 @@ import subprocess
 from typing import Dict, List
 
 
+def _mountpoint_fallback(path: str) -> Dict:
+    try:
+        if os.path.exists(path) and os.listdir(path):
+            return {"pass": True, "detail": f"Path accessible: {path}"}
+        if os.path.exists(path):
+            return {"pass": False, "detail": f"Path exists but is empty: {path}"}
+        return {"pass": False, "detail": f"Path does not exist: {path}"}
+    except Exception as e:
+        return {"pass": False, "detail": f"Path check error: {e}"}
+
+
 def check_mountpoint(path: str) -> Dict:
     """
     Verify path (or one of its parents) is an actual mount point.
@@ -12,7 +23,6 @@ def check_mountpoint(path: str) -> Dict:
     if not os.path.exists(path):
         return {"pass": False, "detail": f"Path does not exist: {path}"}
 
-    # Walk up the tree to find the nearest mount point
     check = path
     while True:
         try:
@@ -21,20 +31,11 @@ def check_mountpoint(path: str) -> Dict:
                 capture_output=True, timeout=5
             )
             if result.returncode == 0:
-                if check == path:
-                    return {"pass": True, "detail": f"Mounted: {path}"}
-                else:
-                    return {"pass": True, "detail": f"Path accessible via mount at {check}"}
+                detail = f"Mounted: {path}" if check == path else f"Path accessible via mount at {check}"
+                return {"pass": True, "detail": detail}
         except FileNotFoundError:
             # mountpoint binary unavailable — just check path exists and is non-empty
-            try:
-                if os.path.exists(path) and os.listdir(path):
-                    return {"pass": True, "detail": f"Path accessible: {path}"}
-                elif os.path.exists(path):
-                    return {"pass": False, "detail": f"Path exists but is empty: {path}"}
-                return {"pass": False, "detail": f"Path does not exist: {path}"}
-            except Exception as e:
-                return {"pass": False, "detail": f"Path check error: {e}"}
+            return _mountpoint_fallback(path)
         except Exception as e:
             return {"pass": False, "detail": f"Mount check error: {e}"}
 
@@ -43,6 +44,10 @@ def check_mountpoint(path: str) -> Dict:
             # Reached filesystem root — path is accessible, just not a named mount
             return {"pass": True, "detail": f"Path accessible: {path}"}
         check = parent
+
+
+def _is_broken_symlink(full: str) -> bool:
+    return os.path.islink(full) and not os.path.exists(full)
 
 
 def check_symlinks(path: str, sample_size: int = 50) -> Dict:
@@ -56,30 +61,19 @@ def check_symlinks(path: str, sample_size: int = 50) -> Dict:
 
     symlinks_checked = 0
     symlinks_broken  = 0
-    broken_examples  = []
+    broken_examples: List[str] = []
 
     try:
         for root, dirs, files in os.walk(path, followlinks=False):
-            # Check file symlinks
-            for fname in files:
-                full = os.path.join(root, fname)
-                if os.path.islink(full):
-                    symlinks_checked += 1
-                    if not os.path.exists(full):
-                        symlinks_broken += 1
-                        if len(broken_examples) < 3:
-                            broken_examples.append(os.path.relpath(full, path))
-                if symlinks_checked >= sample_size:
-                    break
-            # Check directory symlinks (e.g. entire movie folders as symlinks)
-            for d in dirs:
-                full = os.path.join(root, d)
-                if os.path.islink(full):
-                    symlinks_checked += 1
-                    if not os.path.exists(full):
-                        symlinks_broken += 1
-                        if len(broken_examples) < 3:
-                            broken_examples.append(os.path.relpath(full, path))
+            for name in files + dirs:
+                full = os.path.join(root, name)
+                if not os.path.islink(full):
+                    continue
+                symlinks_checked += 1
+                if _is_broken_symlink(full):
+                    symlinks_broken += 1
+                    if len(broken_examples) < 3:
+                        broken_examples.append(os.path.relpath(full, path))
                 if symlinks_checked >= sample_size:
                     break
             if symlinks_checked >= sample_size:
