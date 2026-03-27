@@ -5,11 +5,8 @@ FROM python:3.12-slim
 RUN apt-get update && apt-get install -y --no-install-recommends \
     util-linux \
     gosu \
-    && rm -rf /var/lib/apt/lists/*
-
-# Create a non-root user for running the app
-# The entrypoint.sh uses gosu to drop to PUID/PGID at runtime (default 99:100)
-RUN groupadd -r appgroup && useradd -r -g appgroup appuser
+    && rm -rf /var/lib/apt/lists/* \
+    && groupadd -r appgroup && useradd -r -g appgroup appuser
 
 WORKDIR /app
 RUN mkdir -p /app/data && touch /app/data/config.yml

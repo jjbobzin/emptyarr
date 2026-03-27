@@ -167,13 +167,13 @@ def login():
     return render_template("login.html", error=error)
 
 
-@app.route("/logout")
+@app.route("/logout", methods=["GET"])
 def logout():
     session.clear()
     return redirect(url_for("login"))
 
 
-@app.route("/")
+@app.route("/", methods=["GET"])
 @require_auth
 def index():
     return render_template("index.html",
@@ -184,7 +184,7 @@ def index():
     )
 
 
-@app.route("/api/status")
+@app.route("/api/status", methods=["GET"])
 @require_auth
 def api_status():
     return jsonify({
@@ -198,13 +198,13 @@ def api_status():
     })
 
 
-@app.route("/api/history")
+@app.route("/api/history", methods=["GET"])
 @require_auth
 def api_history():
     return jsonify(runner.get_history())
 
 
-@app.route("/api/checks")
+@app.route("/api/checks", methods=["GET"])
 @require_auth
 def api_checks():
     results = {}
@@ -494,7 +494,7 @@ def api_wizard_save():
         return jsonify({"ok": False, "error": str(e)}), 500
 
 
-@app.route("/api/config/load")
+@app.route("/api/config/load", methods=["GET"])
 @require_auth
 def api_config_load():
     """Return current config.yml contents for the settings editor."""
@@ -506,7 +506,7 @@ def api_config_load():
         return jsonify({"ok": False, "error": str(e)}), 500
 
 
-@app.route("/api/providers/status")
+@app.route("/api/providers/status", methods=["GET"])
 @require_auth
 def api_providers_status():
     """Return account status for all configured providers."""
@@ -548,7 +548,7 @@ def api_providers_save():
         return jsonify({"ok": False, "error": str(e)}), 500
 
 
-@app.route("/api/auth/token")
+@app.route("/api/auth/token", methods=["GET"])
 @require_auth
 def api_auth_token():
     """Return the API token (password hash) for use in X-API-Token header."""
@@ -602,4 +602,5 @@ def api_auth_save():
 
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=8222, debug=False, use_reloader=False)
+    host = os.environ.get("FLASK_HOST", "127.0.0.1")
+    app.run(host=host, port=8222, debug=False, use_reloader=False)

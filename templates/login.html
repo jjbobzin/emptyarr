@@ -122,14 +122,14 @@
     {% endif %}
     <form method="POST" action="/login">
       <div class="form-group">
-        <label class="form-label">Username</label>
+        <label class="form-label" for="username">Username</label>
         <input class="form-input {% if error %}error{% endif %}"
-               type="text" name="username" autofocus autocomplete="username" />
+               type="text" id="username" name="username" autofocus autocomplete="username" />
       </div>
       <div class="form-group">
-        <label class="form-label">Password</label>
+        <label class="form-label" for="password">Password</label>
         <input class="form-input {% if error %}error{% endif %}"
-               type="password" name="password" autocomplete="current-password" />
+               type="password" id="password" name="password" autocomplete="current-password" />
       </div>
       <button class="login-btn" type="submit">Sign in</button>
     </form>

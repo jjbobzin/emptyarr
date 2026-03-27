@@ -47,14 +47,23 @@ docker build -t emptyarr:latest .
 
 **Environment variables:**
 
-| Variable | Description |
-|---|---|
-| `PUID` | `99` (Unraid nobody) |
-| `PGID` | `100` (Unraid users) |
-| `TZ` | Your timezone, e.g. `America/New_York` |
-| `PLEX_TOKEN_<NAME>` | Optional — set per instance, or paste in the UI instead |
-
-Token env var names match your instance name uppercased with spaces/hyphens as underscores: `PLEX_TOKEN_MY_PLEX`, `PLEX_TOKEN_MY_PLEX_UNLIMITED`, etc.
+| Variable | Default | Description |
+|---|---|---|
+| `PUID` | — | User ID for file permissions. `99` on Unraid (nobody) |
+| `PGID` | — | Group ID for file permissions. `100` on Unraid (users) |
+| `TZ` | — | Timezone, e.g. `America/New_York` |
+| `PLEX_TOKEN_<NAME>` | — | Plex token per instance. Name is the instance name uppercased with spaces/hyphens as underscores: `PLEX_TOKEN_MY_PLEX`, `PLEX_TOKEN_MY_PLEX_UNLIMITED`, etc. Can also be entered in the UI |
+| `EMPTYARR_SECRET_KEY` | random | Stable session key — set this so users aren't logged out on every restart. Generate with `openssl rand -hex 32` |
+| `EMPTYARR_USERNAME` | — | Web UI login username. Leave unset to disable auth |
+| `EMPTYARR_PASSWORD` | — | Web UI login password. Leave unset to disable auth |
+| `RD_API_KEY` | — | Real-Debrid API key (alternative to setting it in the UI) |
+| `AD_API_KEY` | — | AllDebrid API key |
+| `TB_API_KEY` | — | Torbox API key |
+| `DL_API_KEY` | — | DebridLink API key |
+| `CONFIG_PATH` | `data/config.yml` | Path to the config file |
+| `LOG_DIR` | `data/logs` | Directory where log files are written |
+| `BROWSE_ROOTS` | `/mnt,/media,/data,/home` | Comma-separated list of root paths the file browser is allowed to enter |
+| `FLASK_HOST` | `127.0.0.1` | Network interface to bind to. Set to `0.0.0.0` if you need external access or are using a reverse proxy |
 
 ### First run
 
