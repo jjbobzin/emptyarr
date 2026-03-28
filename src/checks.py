@@ -50,6 +50,29 @@ def _is_broken_symlink(full: str) -> bool:
     return os.path.islink(full) and not os.path.exists(full)
 
 
+def _walk_symlinks(path: str, sample_size: int) -> tuple:
+    """Walk path counting symlinks and broken ones. Returns (checked, broken, examples[:3])."""
+    symlinks_checked = 0
+    symlinks_broken  = 0
+    broken_examples: List[str] = []
+
+    for root, dirs, files in os.walk(path, followlinks=False):
+        for name in files + dirs:
+            full = os.path.join(root, name)
+            if not os.path.islink(full):
+                continue
+            symlinks_checked += 1
+            if _is_broken_symlink(full):
+                symlinks_broken += 1
+                broken_examples.append(os.path.relpath(full, path))
+            if symlinks_checked >= sample_size:
+                break
+        if symlinks_checked >= sample_size:
+            break
+
+    return symlinks_checked, symlinks_broken, broken_examples[:3]
+
+
 def check_symlinks(path: str, sample_size: int = 50) -> Dict:
     """
     Sample up to sample_size symlinks under path, verify targets resolve.
@@ -59,42 +82,24 @@ def check_symlinks(path: str, sample_size: int = 50) -> Dict:
     if not os.path.exists(path):
         return {"pass": False, "detail": f"Path does not exist: {path}"}
 
-    symlinks_checked = 0
-    symlinks_broken  = 0
-    broken_examples: List[str] = []
-
     try:
-        for root, dirs, files in os.walk(path, followlinks=False):
-            for name in files + dirs:
-                full = os.path.join(root, name)
-                if not os.path.islink(full):
-                    continue
-                symlinks_checked += 1
-                if _is_broken_symlink(full):
-                    symlinks_broken += 1
-                    if len(broken_examples) < 3:
-                        broken_examples.append(os.path.relpath(full, path))
-                if symlinks_checked >= sample_size:
-                    break
-            if symlinks_checked >= sample_size:
-                break
+        checked, broken, examples = _walk_symlinks(path, sample_size)
     except PermissionError as e:
         return {"pass": False, "detail": f"Permission error: {e}"}
 
-    if symlinks_checked == 0:
+    if checked == 0:
         return {"pass": True, "detail": f"No symlinks found in {path} — skipped"}
 
-    broken_pct = symlinks_broken / symlinks_checked
+    broken_pct = broken / checked
     if broken_pct > 0.10:
-        examples = ", ".join(broken_examples)
         return {
             "pass": False,
-            "detail": (f"{symlinks_broken}/{symlinks_checked} sampled symlinks broken "
-                       f"({broken_pct*100:.0f}%) — e.g. {examples}")
+            "detail": (f"{broken}/{checked} sampled symlinks broken "
+                       f"({broken_pct*100:.0f}%) — e.g. {', '.join(examples)}")
         }
     return {
         "pass": True,
-        "detail": (f"Symlinks OK: {symlinks_broken}/{symlinks_checked} broken in sample "
+        "detail": (f"Symlinks OK: {broken}/{checked} broken in sample "
                    f"({broken_pct*100:.0f}%)")
     }
 

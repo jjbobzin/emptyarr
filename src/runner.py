@@ -244,6 +244,18 @@ def _handle_empty_success(config, instance, library, trash_items, all_checks,
                                    instance.name, library.name, all_checks)
 
 
+def _scheduling_blocked(dry_run: bool, manual: bool) -> bool:
+    return not dry_run and not manual and not get_scheduling_enabled()
+
+
+def _handle_section_not_found(config, instance, library):
+    msg = f"Could not find Plex section for '{library.name}'"
+    logger.warning(f"[{instance.name} / {library.name}] {msg}")
+    _record(instance.name, library.name, "error", {}, msg)
+    if config.notify.on_skip and config.discord_webhook:
+        notifications.notify_skip(config.discord_webhook, instance.name, library.name, msg)
+
+
 def run_library(instance: PlexInstanceConfig, library: LibraryConfig,
                 config: AppConfig, plex: PlexClient,
                 plex_checks: Optional[Dict] = None,
@@ -257,7 +269,7 @@ def run_library(instance: PlexInstanceConfig, library: LibraryConfig,
     logger.info(f"[{instance.name} / {library.name}] Starting {mode}{'  (manual)' if manual else ''}")
 
     # Scheduling gate — only applies to cron-triggered runs, not manual or dry run
-    if not dry_run and not manual and not get_scheduling_enabled():
+    if _scheduling_blocked(dry_run, manual):
         logger.info(f"[{instance.name} / {library.name}] Scheduling paused — skipping")
         _record(instance.name, library.name, "skipped", {}, "Scheduling is paused")
         return
@@ -265,11 +277,7 @@ def run_library(instance: PlexInstanceConfig, library: LibraryConfig,
     # Resolve section ID
     section_id = library.section_id or plex.find_section_id(library.name)
     if not section_id:
-        msg = f"Could not find Plex section for '{library.name}'"
-        logger.warning(f"[{instance.name} / {library.name}] {msg}")
-        _record(instance.name, library.name, "error", {}, msg)
-        if config.notify.on_skip and config.discord_webhook:
-            notifications.notify_skip(config.discord_webhook, instance.name, library.name, msg)
+        _handle_section_not_found(config, instance, library)
         return
 
     all_checks = dict(plex_checks or run_instance_checks(instance, plex))
